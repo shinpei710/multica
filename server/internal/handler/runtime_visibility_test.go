@@ -3,9 +3,12 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -74,16 +77,21 @@ func runtimeVisibilityFixture(t *testing.T) (runtimeID, runtimeOwnerID, plainMem
 	t.Helper()
 	ctx := context.Background()
 
+	suffix := uuid.NewString()
+	runtimeOwnerEmail := fmt.Sprintf("runtime-owner-%s@multica.test", suffix)
+	plainMemberEmail := fmt.Sprintf("plain-runtime-member-%s@multica.test", suffix)
+	runtimeName := fmt.Sprintf("Visibility Test Runtime %s", suffix)
+	runtimeProvider := fmt.Sprintf("visibility_test_provider_%s", suffix)
+
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO "user" (name, email)
-		VALUES ('Runtime Owner', 'runtime-owner@multica.test')
+		VALUES ('Runtime Owner', $1)
 		RETURNING id
-	`).Scan(&runtimeOwnerID); err != nil {
+	`, runtimeOwnerEmail).Scan(&runtimeOwnerID); err != nil {
 		t.Fatalf("create runtime owner user: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(),
-			`DELETE FROM "user" WHERE email = 'runtime-owner@multica.test'`)
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, runtimeOwnerID)
 	})
 
 	if _, err := testPool.Exec(ctx, `
@@ -95,14 +103,13 @@ func runtimeVisibilityFixture(t *testing.T) (runtimeID, runtimeOwnerID, plainMem
 
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO "user" (name, email)
-		VALUES ('Plain Runtime Member', 'plain-runtime-member@multica.test')
+		VALUES ('Plain Runtime Member', $1)
 		RETURNING id
-	`).Scan(&plainMemberID); err != nil {
+	`, plainMemberEmail).Scan(&plainMemberID); err != nil {
 		t.Fatalf("create plain member user: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(),
-			`DELETE FROM "user" WHERE email = 'plain-runtime-member@multica.test'`)
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, plainMemberID)
 	})
 
 	if _, err := testPool.Exec(ctx, `
@@ -117,14 +124,14 @@ func runtimeVisibilityFixture(t *testing.T) (runtimeID, runtimeOwnerID, plainMem
 			workspace_id, daemon_id, name, runtime_mode, provider, status,
 			device_info, metadata, owner_id, visibility, last_seen_at
 		)
-		VALUES ($1, NULL, 'Visibility Test Runtime', 'cloud', 'visibility_test_provider', 'online', 'visibility test', '{}'::jsonb, $2, 'private', now())
+		VALUES ($1, NULL, $2, 'cloud', $3, 'online', 'visibility test', '{}'::jsonb, $4, 'private', now())
 		RETURNING id
-	`, testWorkspaceID, runtimeOwnerID).Scan(&runtimeID); err != nil {
+	`, testWorkspaceID, runtimeName, runtimeProvider, runtimeOwnerID).Scan(&runtimeID); err != nil {
 		t.Fatalf("create runtime: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(),
-			`DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE runtime_id = $1`, runtimeID)
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
 	})
 
 	return runtimeID, runtimeOwnerID, plainMemberID
