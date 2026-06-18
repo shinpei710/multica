@@ -142,3 +142,52 @@ func TestUpdateProjectRejectsCycle(t *testing.T) {
 		t.Fatalf("expected cycle error, got %s", body)
 	}
 }
+
+func TestProjectTrashRequiresAdminAndHuman(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	memberID, _ := createEphemeralMember(t, testWorkspaceID, "project-trash-member", "member")
+	project := createProjectForTreeTest(t, "trash permission root", "")
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, project.ID)
+	})
+
+	for _, tc := range []struct {
+		name       string
+		method     string
+		path       string
+		handler    func(http.ResponseWriter, *http.Request)
+		urlParamID bool
+	}{
+		{name: "delete", method: http.MethodDelete, path: "/api/projects/" + project.ID, handler: testHandler.DeleteProject, urlParamID: true},
+		{name: "trash", method: http.MethodGet, path: "/api/projects/trash", handler: testHandler.ListDeletedProjects},
+		{name: "restore", method: http.MethodPost, path: "/api/projects/" + project.ID + "/restore", handler: testHandler.RestoreProject, urlParamID: true},
+	} {
+		t.Run(tc.name+" plain member", func(t *testing.T) {
+			req := newRequestAs(memberID, tc.method, tc.path, nil)
+			if tc.urlParamID {
+				req = withURLParam(req, "id", project.ID)
+			}
+			w := httptest.NewRecorder()
+			tc.handler(w, req)
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+
+		t.Run(tc.name+" task token", func(t *testing.T) {
+			req := newRequest(tc.method, tc.path, nil)
+			req.Header.Set("X-Actor-Source", "task_token")
+			if tc.urlParamID {
+				req = withURLParam(req, "id", project.ID)
+			}
+			w := httptest.NewRecorder()
+			tc.handler(w, req)
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}

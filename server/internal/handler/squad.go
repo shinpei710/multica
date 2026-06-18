@@ -110,6 +110,22 @@ func applySquadMemberSummary(resp *SquadResponse, summary *squadMemberSummary) {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+func (h *Handler) requireConfiguredSquadLeader(ctx context.Context, w http.ResponseWriter, leaderID, workspaceID pgtype.UUID) (db.Agent, bool) {
+	leader, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID:          leaderID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "leader must be a valid agent in this workspace")
+		return db.Agent{}, false
+	}
+	if leader.Kind != "configured" {
+		writeError(w, http.StatusBadRequest, "leader must be a configured agent")
+		return db.Agent{}, false
+	}
+	return leader, true
+}
+
 // loadSquadInWorkspace loads a squad scoped to the current workspace.
 func (h *Handler) loadSquadInWorkspace(w http.ResponseWriter, r *http.Request) (db.Squad, string, bool) {
 	workspaceID := workspaceIDFromURL(r, "workspaceId")
@@ -228,13 +244,7 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate leader is an agent in this workspace.
-	_, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-		ID:          leaderUUID,
-		WorkspaceID: wsUUID,
-	})
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "leader must be a valid agent in this workspace")
+	if _, ok := h.requireConfiguredSquadLeader(r.Context(), w, leaderUUID, wsUUID); !ok {
 		return
 	}
 
@@ -337,11 +347,7 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		// Validate new leader is an agent in workspace.
-		if _, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-			ID: lid, WorkspaceID: wsUUID,
-		}); err != nil {
-			writeError(w, http.StatusBadRequest, "leader must be a valid agent in this workspace")
+		if _, ok := h.requireConfiguredSquadLeader(r.Context(), w, lid, wsUUID); !ok {
 			return
 		}
 		// Ensure new leader is a squad member; auto-add if not.
@@ -673,10 +679,15 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 
 	// Validate the member belongs to this workspace.
 	if req.MemberType == "agent" {
-		if _, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
 			ID: memberUUID, WorkspaceID: wsUUID,
-		}); err != nil {
+		})
+		if err != nil {
 			writeError(w, http.StatusBadRequest, "agent not found in this workspace")
+			return
+		}
+		if agent.Kind != "configured" {
+			writeError(w, http.StatusBadRequest, "agent must be a configured agent")
 			return
 		}
 	} else {

@@ -270,8 +270,8 @@ func TestDeleteAgentRuntime_ActiveSquadWithArchivedLeaderReturnsConflict(t *test
 	if w.Code != http.StatusConflict {
 		t.Fatalf("DeleteAgentRuntime: expected 409 archived-leader squad guard, got %d: %s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "active squads led by archived agents") {
-		t.Fatalf("DeleteAgentRuntime: expected actionable archived-leader squad message, got body %s", w.Body.String())
+	if !strings.Contains(w.Body.String(), "active squads led by archived or runtime-managed agents") {
+		t.Fatalf("DeleteAgentRuntime: expected actionable non-configured-or-archived squad message, got body %s", w.Body.String())
 	}
 
 	if !squadExists(t, activeSquad) {
@@ -306,8 +306,8 @@ func TestDeleteAgentRuntime_ArchivedAndActiveSquadsReturnConflictWithoutDeletes(
 	if w.Code != http.StatusConflict {
 		t.Fatalf("DeleteAgentRuntime: expected 409 archived-leader squad guard, got %d: %s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "active squads led by archived agents") {
-		t.Fatalf("DeleteAgentRuntime: expected actionable archived-leader squad message, got body %s", w.Body.String())
+	if !strings.Contains(w.Body.String(), "active squads led by archived or runtime-managed agents") {
+		t.Fatalf("DeleteAgentRuntime: expected actionable non-configured-or-archived squad message, got body %s", w.Body.String())
 	}
 
 	if !squadExists(t, archivedSquad) {

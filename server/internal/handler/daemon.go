@@ -1789,21 +1789,33 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// path on owner-only endpoints (e.g. `/api/agents/{id}/env`). Runtime
 	// owner is required because task tokens are still bound to an owning user;
 	// without one, fail the claim explicitly instead of letting the daemon
-	// fall back to a member/owner credential. MUL-3292.
+	// fall back to a member/owner credential. Quick-create-agent tasks are
+	// attributed to the human requester so AI-created agents are owned by the
+	// requester even when they used someone else's public runtime. MUL-3292.
 	// Token expires after the queue/runtime upper bound (24h) so it survives
 	// long-running tasks but cannot outlive a forgotten one.
-	if !runtime.OwnerID.Valid {
+	tokenOwnerID := runtime.OwnerID
+	if hasQuickCreateAgent {
+		tokenOwnerID = pgtype.UUID{}
+		var qca service.QuickCreateAgentContext
+		if json.Unmarshal(task.Context, &qca) == nil && qca.Type == service.QuickCreateAgentContextType {
+			if requesterUUID, err := util.ParseUUID(qca.RequesterID); err == nil {
+				tokenOwnerID = requesterUUID
+			}
+		}
+	}
+	if !tokenOwnerID.Valid {
 		outcome = "error_token"
-		slog.Error("task claim: runtime owner missing; cancelling task to avoid unscoped agent credentials",
+		slog.Error("task claim: token owner missing; cancelling task to avoid unscoped agent credentials",
 			"task_id", uuidToString(task.ID),
 			"runtime_id", runtimeID,
 			"workspace_id", runtimeWorkspaceID,
 		)
 		if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
-			slog.Error("task claim: cancel after missing runtime owner failed",
+			slog.Error("task claim: cancel after missing token owner failed",
 				"task_id", uuidToString(task.ID), "error", cerr)
 		}
-		writeError(w, http.StatusInternalServerError, "runtime owner required to mint task token")
+		writeError(w, http.StatusInternalServerError, "task token owner required to mint task token")
 		return
 	}
 	tokenStr, terr := auth.GenerateAgentTaskToken()
@@ -1819,7 +1831,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		TaskID:      task.ID,
 		AgentID:     task.AgentID,
 		WorkspaceID: parseUUID(resp.WorkspaceID),
-		UserID:      runtime.OwnerID,
+		UserID:      tokenOwnerID,
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
 	}); terr != nil {
 		outcome = "error_token"

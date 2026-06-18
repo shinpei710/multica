@@ -568,6 +568,75 @@ export const EMPTY_CANCEL_TASK_RESPONSE: CancelTaskResponse = {
 };
 
 // ---------------------------------------------------------------------------
+
+const AgentSkillSummarySchema = z.object({
+  id: z.string(),
+  name: z.string().default(""),
+  description: z.string().default(""),
+}).loose();
+
+export const AgentSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  runtime_id: z.string().default(""),
+  name: z.string().default(""),
+  description: z.string().default(""),
+  instructions: z.string().default(""),
+  avatar_url: z.string().nullable().optional().transform((v) => v ?? null),
+  runtime_mode: z.string().default("cloud"),
+  runtime_config: z.record(z.string(), z.unknown()).default({}),
+  custom_args: z.array(z.string()).default([]),
+  has_custom_env: z.boolean().optional(),
+  custom_env_key_count: z.number().optional(),
+  mcp_config: z.unknown().nullable().optional(),
+  mcp_config_redacted: z.boolean().optional(),
+  visibility: z.string().default("private"),
+  status: z.string().default("offline"),
+  kind: z.string().optional().default("configured"),
+  origin_type: z.string().nullable().optional().transform((v) => v ?? null),
+  origin_id: z.string().nullable().optional().transform((v) => v ?? null),
+  max_concurrent_tasks: z.number().default(1),
+  model: z.string().default(""),
+  thinking_level: z.string().optional().default(""),
+  owner_id: z.string().nullable().optional().transform((v) => v ?? null),
+  skills: z.array(AgentSkillSummarySchema).default([]),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  archived_at: z.string().nullable().optional().transform((v) => v ?? null),
+  archived_by: z.string().nullable().optional().transform((v) => v ?? null),
+}).loose();
+
+export const AgentListSchema = z.array(AgentSchema);
+
+export const EMPTY_AGENT: Agent = {
+  id: "",
+  workspace_id: "",
+  runtime_id: "",
+  name: "",
+  description: "",
+  instructions: "",
+  avatar_url: null,
+  runtime_mode: "cloud",
+  runtime_config: {},
+  custom_args: [],
+  visibility: "private",
+  status: "offline",
+  kind: "configured",
+  origin_type: null,
+  origin_id: null,
+  max_concurrent_tasks: 1,
+  model: "",
+  thinking_level: "",
+  owner_id: null,
+  skills: [],
+  created_at: "",
+  updated_at: "",
+  archived_at: null,
+  archived_by: null,
+};
+
+export const EMPTY_AGENT_LIST: Agent[] = [];
+
 // Agent template catalog — `/api/agent-templates*` and the
 // create-from-template response. The desktop app's create-agent picker
 // reaches these endpoints, and a future server change to the template shape

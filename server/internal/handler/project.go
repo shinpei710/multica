@@ -606,6 +606,14 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+func (h *Handler) requireProjectTrashManager(w http.ResponseWriter, r *http.Request, workspaceID string) (db.Member, bool) {
+	if r.Header.Get("X-Actor-Source") == "task_token" || r.Header.Get("X-Actor-Source") == "cloud_pat" {
+		writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
+		return db.Member{}, false
+	}
+	return h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin")
+}
+
 func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	workspaceID := h.resolveWorkspaceID(r)
@@ -617,6 +625,10 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	member, ok := h.requireProjectTrashManager(w, r, workspaceID)
+	if !ok {
+		return
+	}
 	project, err := h.Queries.GetActiveProjectInWorkspace(r.Context(), db.GetActiveProjectInWorkspaceParams{
 		ID: idUUID, WorkspaceID: wsUUID,
 	})
@@ -624,10 +636,7 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
-	userID, ok := requireUserID(w, r)
-	if !ok {
-		return
-	}
+	userID := uuidToString(member.UserID)
 	childCount, err := h.Queries.CountChildProjectsByProject(r.Context(), project.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to inspect project children")
@@ -650,7 +659,7 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	deleted, err := h.Queries.SoftDeleteProjectTree(r.Context(), db.SoftDeleteProjectTreeParams{
 		ID:          project.ID,
 		WorkspaceID: project.WorkspaceID,
-		DeletedBy:   parseUUID(userID),
+		DeletedBy:   member.UserID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete project")
@@ -671,6 +680,9 @@ func (h *Handler) ListDeletedProjects(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
+		return
+	}
+	if _, ok := h.requireProjectTrashManager(w, r, workspaceID); !ok {
 		return
 	}
 	projects, err := h.Queries.ListDeletedProjects(r.Context(), wsUUID)
@@ -696,10 +708,11 @@ func (h *Handler) RestoreProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	userID, ok := requireUserID(w, r)
+	member, ok := h.requireProjectTrashManager(w, r, workspaceID)
 	if !ok {
 		return
 	}
+	userID := uuidToString(member.UserID)
 	restored, err := h.Queries.RestoreProjectTree(r.Context(), db.RestoreProjectTreeParams{
 		ID:          idUUID,
 		WorkspaceID: wsUUID,

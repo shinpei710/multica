@@ -270,6 +270,20 @@ describe("ProjectsPage compact row navigation", () => {
     ).not.toBeInTheDocument();
   });
 
+
+
+  it("hides the trash entry for non-admin members", () => {
+    mocks.members = [
+      { user_id: "user-1", name: "User One", role: "member" },
+    ];
+
+    renderProjects();
+
+    expect(
+      screen.queryByRole("button", { name: "Trash" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("navigates from the row surface", async () => {
     const user = userEvent.setup();
     const push = vi.fn();

@@ -51,7 +51,10 @@ multica repo checkout <url> --ref <branch-or-sha>
 
 `runtime update` and `runtime delete` are writes. Runtime registration and
 updates upsert the runtime blank agent: its name follows the runtime name, owner
-follows the runtime owner, and visibility follows the runtime visibility.
+follows the runtime owner, and visibility follows the runtime visibility. When a
+quick-create-agent task runs through a runtime blank agent, the task token is
+bound to the human requester so the newly created agent belongs to that
+requester even on someone else's public runtime.
 `runtime delete` removes a runtime registration; if active configured agents are
 still bound, it refuses unless the user explicitly passes `--cascade`, which
 archives those agents and cancels their queued/running tasks before deleting the

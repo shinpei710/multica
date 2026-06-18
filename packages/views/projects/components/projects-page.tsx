@@ -761,8 +761,7 @@ function ProjectBatchToolbar({
   );
 }
 
-
-function ProjectTrashDialog() {
+function ProjectTrashDialog({ canManage }: { canManage: boolean }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
   const [open, setOpen] = useState(false);
@@ -777,9 +776,13 @@ function ProjectTrashDialog() {
       await restoreProject.mutateAsync(project.id);
       toast.success(t(($) => $.trash.toast_restored));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t(($) => $.trash.toast_restore_failed));
+      toast.error(
+        err instanceof Error ? err.message : t(($) => $.trash.toast_restore_failed),
+      );
     }
   };
+
+  if (!canManage) return null;
 
   return (
     <>
@@ -814,7 +817,10 @@ function ProjectTrashDialog() {
             ) : (
               <div className="divide-y">
                 {deletedProjects.map((project) => (
-                  <div key={project.id} className="flex items-center gap-3 px-3 py-2.5">
+                  <div
+                    key={project.id}
+                    className="flex items-center gap-3 px-3 py-2.5"
+                  >
                     <ProjectIcon project={project} size="sm" />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">{project.title}</div>
@@ -1027,7 +1033,7 @@ export function ProjectsPage() {
           )}
         </div>
         <div className="flex items-center gap-1">
-          <ProjectTrashDialog />
+          <ProjectTrashDialog canManage={isWorkspaceAdmin} />
           <Button
             size="sm"
             variant="outline"

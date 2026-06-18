@@ -814,6 +814,11 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "origin fields are only accepted from task-scoped agent execution")
 			return
 		}
+		currentTaskID := r.Header.Get("X-Task-ID")
+		if currentTaskID == "" || currentTaskID != req.OriginID {
+			writeError(w, http.StatusForbidden, "origin_id must match the current agent task")
+			return
+		}
 		task, err := h.Queries.GetAgentTask(r.Context(), originUUID)
 		if err != nil || uuidToString(task.AgentID) != r.Header.Get("X-Agent-ID") {
 			writeError(w, http.StatusForbidden, "origin_id does not match the current agent task")

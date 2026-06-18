@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/service"
 )
 
 // TestListWorkspaceAgentTaskSnapshot covers the agent presence snapshot endpoint:
@@ -933,3 +935,79 @@ func insertHandlerTestTask(t *testing.T, agentID string) string {
 // Defence-in-depth: spot-check that the package compiles a small
 // fmt.Sprintf so accidental imports stay tidy.
 var _ = fmt.Sprintf
+
+func createRuntimeBlankAgentForQuickCreateTest(t *testing.T, runtimeID, ownerID string) string {
+	t.Helper()
+	var agentID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args, kind
+		)
+		VALUES ($1, 'quick create blank agent', '', 'cloud', '{}'::jsonb,
+		        $2, 'workspace', 1, $3, '', '{}'::jsonb, '[]'::jsonb, 'runtime_blank')
+		RETURNING id
+	`, testWorkspaceID, runtimeID, ownerID).Scan(&agentID); err != nil {
+		t.Fatalf("create runtime blank agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+	return agentID
+}
+
+func createQuickCreateAgentTaskForOriginTest(t *testing.T, agentID, runtimeID string) string {
+	t.Helper()
+	ctx := context.Background()
+	payload, err := json.Marshal(service.QuickCreateAgentContext{
+		Type:        service.QuickCreateAgentContextType,
+		Prompt:      "Create a release manager agent",
+		RequesterID: testUserID,
+		WorkspaceID: testWorkspaceID,
+		RuntimeID:   runtimeID,
+		Visibility:  "private",
+	})
+	if err != nil {
+		t.Fatalf("marshal quick-create-agent context: %v", err)
+	}
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, context)
+		VALUES ($1, $2, 'running', 0, $3)
+		RETURNING id
+	`, agentID, runtimeID, payload).Scan(&taskID); err != nil {
+		t.Fatalf("create quick-create-agent task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+	return taskID
+}
+
+func TestCreateAgentQuickCreateOriginMustMatchCurrentTask(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID := handlerTestRuntimeID(t)
+	blankID := createRuntimeBlankAgentForQuickCreateTest(t, runtimeID, testUserID)
+	currentTaskID := createQuickCreateAgentTaskForOriginTest(t, blankID, runtimeID)
+	otherTaskID := createQuickCreateAgentTaskForOriginTest(t, blankID, runtimeID)
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodPost, "/api/agents?workspace_id="+testWorkspaceID, map[string]any{
+		"name":                 "origin mismatch created agent",
+		"runtime_id":           runtimeID,
+		"visibility":           "private",
+		"max_concurrent_tasks": 1,
+		"origin_type":          "quick_create_agent",
+		"origin_id":            otherTaskID,
+	})
+	req.Header.Set("X-Actor-Source", "task_token")
+	req.Header.Set("X-Agent-ID", blankID)
+	req.Header.Set("X-Task-ID", currentTaskID)
+	testHandler.CreateAgent(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("CreateAgent: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}

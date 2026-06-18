@@ -608,14 +608,14 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Refuse before any teardown-side effects if the runtime still has active
-	// squads whose leader is already archived on this runtime.
-	activeSquadCount, err := h.Queries.CountActiveSquadsWithArchivedLeadersByRuntime(r.Context(), rt.ID)
+	// squads whose leader cannot remain after runtime teardown.
+	activeSquadCount, err := h.Queries.CountActiveSquadsWithNonConfiguredLeadersByRuntime(r.Context(), rt.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check runtime squad dependencies")
 		return
 	}
 	if activeSquadCount > 0 {
-		writeError(w, http.StatusConflict, "cannot delete runtime: it has active squads led by archived agents. Archive those squads or assign them a new leader first.")
+		writeError(w, http.StatusConflict, "cannot delete runtime: it has active squads led by archived or runtime-managed agents. Archive those squads or assign them a new leader first.")
 		return
 	}
 

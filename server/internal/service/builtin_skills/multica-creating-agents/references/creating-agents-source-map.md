@@ -62,7 +62,7 @@ only.
 | `runtime_id` must resolve in workspace | 770–777 | parsed + `GetAgentRuntimeForWorkspace`; unknown → 400 "invalid runtime_id" |
 | Runtime access gate | 779–786 | private runtimes can only be used by their owner or a workspace admin |
 | `thinking_level` provider-level validation | 788–795 | `!agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel)` → 400; per-model gaps deferred to daemon |
-| `origin_type` / `origin_id` validation | 797–830 | only accepts `origin_type=quick_create_agent`; requires `origin_id`; actor must be a task-scoped agent; task id must match `X-Agent-ID`; task context type must be `quick_create_agent` |
+| `origin_type` / `origin_id` validation | 797–835 | only accepts `origin_type=quick_create_agent`; requires `origin_id`; actor must be a task-scoped agent; `origin_id` must equal current `X-Task-ID`; task agent must match `X-Agent-ID`; task context type must be `quick_create_agent` |
 | Defaults: `{}` config/env, `[]` args | 847–860 | `RuntimeConfig`→`{}`, `CustomEnv`→`{}`, `CustomArgs`→`[]` when nil, before insert |
 | `mcp_config` null-skip on create | 862–865 | raw JSON copied through unless the body value is the literal `null` |
 | `CreateAgent` insert params | 867–886 | persists runtime_config, instructions, custom_env, custom_args, model, thinking_level, mcp_config, visibility, max_concurrent_tasks, origin_type, and origin_id |

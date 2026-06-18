@@ -56,6 +56,9 @@ go test ./internal/service -run TestBuiltinSkillsConformToTemplate
   the agent's current name and skills from the DB.
 - `server/internal/handler/daemon.go:1720-1727` maps `quick_create_agent` context
   onto the daemon task response fields used by the daemon prompt and env.
+- `server/internal/handler/daemon.go:1788-1834` mints task tokens. Standard
+  tasks use the runtime owner; quick-create-agent tasks use the requester from
+  task context so AI-created agents are owned by the requesting human.
 - `server/internal/handler/daemon.go:1737-1764` enforces workspace isolation for
   issue, chat, autopilot, quick-create, and quick-create-agent tasks before
   minting the task token.

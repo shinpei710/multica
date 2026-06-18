@@ -157,7 +157,8 @@ daemon prompt asks the blank agent to run exactly one
 daemon injects `MULTICA_QUICK_CREATE_AGENT_TASK_ID`, the CLI automatically adds
 `origin_type=quick_create_agent` and `origin_id=<task-id>` to the create body.
 Those origin fields are accepted only from a task-scoped agent execution whose
-current task is a quick-create-agent task.
+`origin_id` equals the current task ID and whose current task is a
+quick-create-agent task.
 
 Completion is discovered by `GetAgentByOrigin`. Success writes an
 `agent_create_done` inbox item; missing/failed creation writes
