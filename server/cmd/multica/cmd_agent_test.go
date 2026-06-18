@@ -1482,3 +1482,91 @@ func TestAgentCreateThinkingLevelServerRejectionSurfaces(t *testing.T) {
 		t.Fatalf("server thinking_level rejection should surface to the user; got: %v", err)
 	}
 }
+
+func freshAgentInstructionsCmd() *cobra.Command {
+	c := &cobra.Command{Use: "agent"}
+	c.Flags().String("instructions", "", "")
+	c.Flags().Bool("instructions-stdin", false, "")
+	c.Flags().String("instructions-file", "", "")
+	return c
+}
+
+func TestResolveInstructions(t *testing.T) {
+	t.Run("not supplied", func(t *testing.T) {
+		cmd := freshAgentInstructionsCmd()
+		got, ok, err := resolveInstructions(cmd)
+		if err != nil || ok || got != "" {
+			t.Fatalf("unset flags: got=%q ok=%v err=%v", got, ok, err)
+		}
+	})
+
+	t.Run("inline", func(t *testing.T) {
+		cmd := freshAgentInstructionsCmd()
+		if err := cmd.Flags().Set("instructions", "Be useful"); err != nil {
+			t.Fatal(err)
+		}
+		got, ok, err := resolveInstructions(cmd)
+		if err != nil || !ok || got != "Be useful" {
+			t.Fatalf("inline: got=%q ok=%v err=%v", got, ok, err)
+		}
+	})
+
+	t.Run("stdin", func(t *testing.T) {
+		cmd := freshAgentInstructionsCmd()
+		if err := cmd.Flags().Set("instructions-stdin", "true"); err != nil {
+			t.Fatal(err)
+		}
+		cmd.SetIn(bytes.NewBufferString("Line one\nLine two\n"))
+		got, ok, err := resolveInstructions(cmd)
+		if err != nil || !ok || got != "Line one\nLine two\n" {
+			t.Fatalf("stdin: got=%q ok=%v err=%v", got, ok, err)
+		}
+	})
+
+	t.Run("file", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "instructions.md")
+		if err := os.WriteFile(path, []byte("Role\nWorkflow\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := freshAgentInstructionsCmd()
+		if err := cmd.Flags().Set("instructions-file", path); err != nil {
+			t.Fatal(err)
+		}
+		got, ok, err := resolveInstructions(cmd)
+		if err != nil || !ok || got != "Role\nWorkflow\n" {
+			t.Fatalf("file: got=%q ok=%v err=%v", got, ok, err)
+		}
+	})
+
+	t.Run("mutually exclusive", func(t *testing.T) {
+		cmd := freshAgentInstructionsCmd()
+		_ = cmd.Flags().Set("instructions", "inline")
+		_ = cmd.Flags().Set("instructions-stdin", "true")
+		_, _, err := resolveInstructions(cmd)
+		if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Fatalf("expected mutual exclusion error, got %v", err)
+		}
+	})
+
+	t.Run("empty stdin errors", func(t *testing.T) {
+		cmd := freshAgentInstructionsCmd()
+		_ = cmd.Flags().Set("instructions-stdin", "true")
+		cmd.SetIn(bytes.NewBufferString("  \n"))
+		_, _, err := resolveInstructions(cmd)
+		if err == nil || !strings.Contains(err.Error(), "empty input") {
+			t.Fatalf("expected empty stdin error, got %v", err)
+		}
+	})
+}
+
+func TestAgentCreateAndUpdateExposeInstructionsFileFlags(t *testing.T) {
+	for _, flag := range []string{"instructions-stdin", "instructions-file"} {
+		if agentCreateCmd.Flag(flag) == nil {
+			t.Fatalf("agent create must expose --%s", flag)
+		}
+		if agentUpdateCmd.Flag(flag) == nil {
+			t.Fatalf("agent update must expose --%s", flag)
+		}
+	}
+}

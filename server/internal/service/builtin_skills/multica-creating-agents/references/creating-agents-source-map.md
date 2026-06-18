@@ -18,16 +18,18 @@ go test ./internal/service -run TestBuiltinSkillsConformToTemplate
 
 | Contract | Line | Behavior | Safe check |
 |---|---|---|---|
-| Create flags: `name`, `description`, `instructions`, `runtime-id` | 159–162 | Registered create flags; `name`/`runtime-id` enforced in `runAgentCreate` | `multica agent create --help` |
-| `runtime-config`, `model`, `thinking-level`, `custom-args` flags | 163–166 | `model` help: "Prefer this over passing --model in --custom-args"; `thinking-level` is a thin pass-through (server validates the provider enum, empty = runtime default); `custom-args` help names codex/openclaw rejecting `--model` (CLI help only, not server-enforced) | `multica agent create --help` |
-| Secret-safe env input: `custom-env`, `custom-env-stdin`, `custom-env-file` | 167–169 | `--custom-env` warns about shell history / `ps`; stdin and file modes keep secrets off the command line; mutually exclusive | `multica agent create --help` |
-| Secret-safe MCP input: `mcp-config`, `mcp-config-stdin`, `mcp-config-file` (create) | 170–172 | Same three-channel pattern as `custom-env`; `--mcp-config` warns about shell history / `ps`; value must be a JSON object or `null` | `multica agent create --help` |
-| MCP flags on `agent update` | 194–196 | Same three channels on update; `--mcp-config null` clears. Unlike `custom_env`, `mcp_config` IS settable via update | `multica agent update --help` |
-| `thinking-level` flag on `agent update` | 184 | New reasoning/effort level; thin pass-through; `--thinking-level ""` clears to runtime default (mirrors `--model`) | `multica agent update --help` |
-| `runAgentCreate` builds body + `POST /api/agents` | 419 | Only sets a body key when the flag `Changed`; posts to `/api/agents` (line 495) | read 419–496 |
-| Body assembly: description/instructions/runtime-config/custom-args/custom-env/mcp-config/model/thinking-level | 438–488 | `resolveCustomEnv` (460) and `resolveMcpConfig` (465) gate their secret channels; `model` (470) and `thinking_level` (478) are `Changed`-gated pass-throughs; omitted flags are not sent | read 438–488 |
+| Create flags: `name`, `description`, `instructions`, `instructions-stdin`, `instructions-file`, `runtime-id` | 159–164 | Registered create flags; `instructions-file` / `instructions-stdin` provide safe multi-line input; `name`/`runtime-id` enforced in `runAgentCreate` | `multica agent create --help` |
+| `runtime-config`, `model`, `thinking-level`, `custom-args` flags | 165–168 | `model` help: "Prefer this over passing --model in --custom-args"; `thinking-level` is a thin pass-through (server validates the provider enum, empty = runtime default); `custom-args` help names codex/openclaw rejecting `--model` (CLI help only, not server-enforced) | `multica agent create --help` |
+| Secret-safe env input: `custom-env`, `custom-env-stdin`, `custom-env-file` | 169–171 | `--custom-env` warns about shell history / `ps`; stdin and file modes keep secrets off the command line; mutually exclusive | `multica agent create --help` |
+| Secret-safe MCP input: `mcp-config`, `mcp-config-stdin`, `mcp-config-file` (create) | 172–174 | Same three-channel pattern as `custom-env`; `--mcp-config` warns about shell history / `ps`; value must be a JSON object or `null` | `multica agent create --help` |
+| MCP flags on `agent update` | 197–199 | Same three channels on update; `--mcp-config null` clears. Unlike `custom_env`, `mcp_config` IS settable via update | `multica agent update --help` |
+| `thinking-level` flag on `agent update` | 187 | New reasoning/effort level; thin pass-through; `--thinking-level ""` clears to runtime default (mirrors `--model`) | `multica agent update --help` |
+| `runAgentCreate` builds body + `POST /api/agents` | 419 | Only sets a body key when the flag `Changed`; posts to `/api/agents` (line 499) | read 419–500 |
+| Body assembly: description/instructions/runtime-config/custom-args/custom-env/mcp-config/model/thinking-level | 438–491 | `resolveInstructions` gates inline/stdin/file instruction input; `resolveCustomEnv` and `resolveMcpConfig` gate their secret channels; `model` and `thinking_level` are `Changed`-gated pass-throughs; omitted flags are not sent | read 438–491 |
+| Quick-create-agent origin stamping | 490–493 | When `MULTICA_QUICK_CREATE_AGENT_TASK_ID` exists, CLI adds `origin_type=quick_create_agent` and `origin_id=<task-id>` before posting to `/api/agents` | read 490–493 |
 | `runAgentUpdate` sends `thinking_level` / `mcp_config` | 508 | `thinking_level` added when `--thinking-level` is `Changed` (556); `resolveMcpConfig` adds `mcp_config` (570); `PUT /api/agents/{id}` at 584; `custom_env` is intentionally not a flag here | read 508–585 |
-| `parseMcpConfig` / `resolveMcpConfig` helpers | 1086, 1114 | Validator (object-or-`null`, content-free errors) + three-channel resolver, mirroring `parseCustomEnv`/`resolveCustomEnv` | read 1086–1170 |
+| `resolveInstructions` helper | around 1010 | Mutually exclusive inline/stdin/file instruction input; stdin/file reject empty content so generated multi-line instructions can avoid shell quoting | read helper |
+| `parseMcpConfig` / `resolveMcpConfig` helpers | around 1130 | Validator (object-or-`null`, content-free errors) + three-channel resolver, mirroring `parseCustomEnv`/`resolveCustomEnv` | read helpers |
 | `agent skills set` = replace-all | 792 | `PUT /api/agents/{id}/skills` (810); `--skill-ids ''` clears all (798–799) | `multica agent skills set --help` |
 | `agent skills add` = additive | 817 | `POST /api/agents/{id}/skills/add` (838); requires ≥1 id (823–828) | `multica agent skills add --help` |
 | `agent skills list` | 760 | reads bindings, no side effect | `multica agent skills list --help` |
@@ -50,22 +52,43 @@ only.
 | Contract | Line | Behavior |
 |---|---|---|
 | `maxAgentDescriptionLength = 255` | 31 | Cap is 255 **Unicode code points** (comment: counted via `utf8.RuneCountInString`, matches Postgres `char_length`) |
-| `AgentResponse` omits plaintext `custom_env` | 33–53 | Exposes only `has_custom_env` (52) and `custom_env_key_count` (53); comment cites MUL-2600 |
-| `CreateAgentRequest` fields | 565–585 | `description`, `instructions`, `runtime_config`, `custom_env`, `custom_args`, `model`, `thinking_level` (plus name/avatar/visibility/mcp_config/max_concurrent_tasks) |
-| `name` required | 623–625 | 400 "name is required" |
-| `description` ≤ 255 code points | 627–629 | `utf8.RuneCountInString(req.Description) > maxAgentDescriptionLength` → 400 |
-| `runtime_id` required | 631–633 | `if req.RuntimeID == ""` → 400 "runtime_id is required" |
-| `runtime_id` must resolve in workspace | 642–658 | parsed + `GetAgentRuntimeForWorkspace`; unknown → 400 "invalid runtime_id" |
-| `thinking_level` provider-level validation | 673–676 | `!agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel)` → 400; per-model gaps deferred to daemon (comment 669–672, MUL-2339) |
-| Defaults: `{}` config/env, `[]` args | 688–701 | `RuntimeConfig`→`{}`, `CustomEnv`→`{}`, `CustomArgs`→`[]` when nil, before insert |
-| `visibility` default | 635–636 | `if req.Visibility == "" { req.Visibility = "private" }` — access-control field, not the runtime prompt |
-| `max_concurrent_tasks` default | 638–639 | `if req.MaxConcurrentTasks == 0 { req.MaxConcurrentTasks = 6 }` — scheduler cap |
-| `mcp_config` null-skip on create | 704–705 | raw JSON copied through unless the body value is the literal `null` |
-| `mcp_config` redacted on read | 54, 848–851 | `redactMcpConfig` sets `McpConfigRedacted=true`; a private agent read by a member also redacts (494, 509) |
-| `CreateAgent` insert params | 708–722 | persists runtime_config, instructions, custom_env, custom_args, model, thinking_level, mcp_config, visibility, max_concurrent_tasks |
-| `UpdateAgent` rejects `custom_env` | 910–913 | if `custom_env` present in body → 400 "use PUT /api/agents/{id}/env (or `multica agent env set`)" |
-| `UpdateAgent` persists / clears `mcp_config` | 944–948, 1060–1061 | Tri-state from the raw body: key omitted → no change; literal `null` → `ClearAgentMcpConfig`; object → replace. No 400 like `custom_env` — `mcp_config` IS updatable here |
-| `description` ≤ 255 on update too | 921–924 | same cap re-checked on update |
+| `AgentResponse` omits plaintext `custom_env` and exposes agent provenance | 34–72 | Exposes only `has_custom_env` (53) and `custom_env_key_count` (54); also returns `kind` (64), `origin_type` (65), and `origin_id` (66) |
+| `CreateAgentRequest` fields | 682–704 | `description`, `instructions`, `runtime_config`, `custom_env`, `custom_args`, `model`, `thinking_level`, `origin_type`, and `origin_id` (plus name/avatar/visibility/mcp_config/max_concurrent_tasks) |
+| `name` required | 742–745 | 400 "name is required" |
+| `description` ≤ 255 code points | 746–749 | `utf8.RuneCountInString(req.Description) > maxAgentDescriptionLength` → 400 |
+| `runtime_id` required | 750–753 | `if req.RuntimeID == ""` → 400 "runtime_id is required" |
+| `visibility` default | 754–756 | `if req.Visibility == "" { req.Visibility = "private" }` — access-control field, not the runtime prompt |
+| `max_concurrent_tasks` default | 757–759 | `if req.MaxConcurrentTasks == 0 { req.MaxConcurrentTasks = 6 }` — scheduler cap |
+| `runtime_id` must resolve in workspace | 770–777 | parsed + `GetAgentRuntimeForWorkspace`; unknown → 400 "invalid runtime_id" |
+| Runtime access gate | 779–786 | private runtimes can only be used by their owner or a workspace admin |
+| `thinking_level` provider-level validation | 788–795 | `!agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel)` → 400; per-model gaps deferred to daemon |
+| `origin_type` / `origin_id` validation | 797–835 | only accepts `origin_type=quick_create_agent`; requires `origin_id`; actor must be a task-scoped agent; `origin_id` must equal current `X-Task-ID`; task agent must match `X-Agent-ID`; task context type must be `quick_create_agent` |
+| Defaults: `{}` config/env, `[]` args | 847–860 | `RuntimeConfig`→`{}`, `CustomEnv`→`{}`, `CustomArgs`→`[]` when nil, before insert |
+| `mcp_config` null-skip on create | 862–865 | raw JSON copied through unless the body value is the literal `null` |
+| `CreateAgent` insert params | 867–886 | persists runtime_config, instructions, custom_env, custom_args, model, thinking_level, mcp_config, visibility, max_concurrent_tasks, origin_type, and origin_id |
+| `mcp_config` redacted on read | 55, 660–676 | `redactMcpConfig` sets `McpConfigRedacted=true`; reads redact for agent actors, workspace always-redact, and users lacking secret access |
+| Runtime blank agent write guard | 1152–1158 | `kind=runtime_blank` returns 400 for managed agent writes; update, env, and skill handlers call this guard |
+| `UpdateAgent` rejects `custom_env` | 1184–1187 | if `custom_env` present in body → 400 "use PUT /api/agents/{id}/env (or `multica agent env set`)" |
+| `UpdateAgent` persists / clears `mcp_config` | 1218–1222, 1334–1335 | Tri-state from the raw body: key omitted → no change; literal `null` → `ClearAgentMcpConfig`; object → replace. No 400 like `custom_env` — `mcp_config` IS updatable here |
+| `description` ≤ 255 on update too | 1195–1198 | same cap re-checked on update |
+| `QuickCreateAgentRequest` and response | 924–934 | request fields are `prompt`, `runtime_id`, `visibility`, `model`, and `thinking_level`; response is accepted `task_id` |
+| `QuickCreateAgent` handler | 936–1019 | validates prompt/runtime/visibility/runtime access/runtime online/quick-create-agent daemon support/thinking level, ensures the runtime blank agent, and enqueues a quick-create-agent task |
+| Quick-create-agent daemon gate | `server/pkg/agent/version.go`, `server/internal/handler/issue.go` | `MinQuickCreateAgentCLIVersion` is stricter than the issue quick-create minimum because this flow requires quick-create-agent task payloads, `MULTICA_QUICK_CREATE_AGENT_TASK_ID`, and `--instructions-file` |
+
+## Runtime blank and AI-created-agent flow
+
+| Contract | Line | Behavior |
+|---|---|---|
+| Runtime blank agent response fields | `server/internal/handler/runtime.go:73–89` | `ensureRuntimeBlankAgent` upserts the blank agent and publishes an agent event |
+| Runtime visibility mapping | `server/internal/handler/runtime.go:91–96` | runtime `public` maps to agent `workspace`; other values map to `private` |
+| Runtime blank upsert SQL | `server/pkg/db/queries/agent.sql:702–724` | unique per runtime; empty instructions/env/args/MCP/model/thinking; `kind='runtime_blank'` |
+| Quick-create-agent task context | `server/internal/service/task.go:608–624` | context stores prompt, requester/workspace, selected runtime, visibility, model, and thinking level |
+| Enqueue quick-create-agent task | `server/internal/service/task.go:696–741` | requires `kind=runtime_blank`; queues with blank agent id and runtime id; wakes daemon |
+| Daemon prompt dispatch | `server/internal/daemon/prompt.go:17–32` | quick-create-agent prompt wins before normal quick-create / issue prompts |
+| Daemon agent-design prompt | `server/internal/daemon/prompt.go:41–76` | instructs exactly one `multica agent create --output json`, uses `--instructions-file` for generated multi-line instructions, passes selected runtime/visibility/model/thinking, and forbids retry |
+| Env marker injection | `server/internal/daemon/daemon.go:3374–3376` | injects `MULTICA_QUICK_CREATE_AGENT_TASK_ID=<task-id>` into the task process |
+| Completion lookup | `server/internal/service/task.go:2504–2554` | success path finds the new agent by `origin_type=quick_create_agent` and `origin_id=<task-id>`, then writes `agent_create_done` inbox |
+| Failure notification | `server/internal/service/task.go:2556–2593` | failure/missing agent path writes `agent_create_failed` inbox |
 
 ## Env endpoint — `server/internal/handler/agent_env.go`
 
@@ -108,7 +131,7 @@ only.
 
 | Contract | Line | Behavior |
 |---|---|---|
-| `CreateAgent` INSERT | 730–736 | columns include `runtime_config, runtime_id, instructions, custom_env, custom_args, mcp_config, model, thinking_level` |
-| `CreateAgentParams` | 739–756 | typed params: `RuntimeConfig []byte`, `Instructions string`, `CustomEnv []byte`, `CustomArgs []byte`, `Model pgtype.Text`, `ThinkingLevel pgtype.Text` |
+| `CreateAgent` INSERT | generated file | columns include `runtime_config, runtime_id, instructions, custom_env, custom_args, mcp_config, model, thinking_level, origin_type, origin_id` |
+| `CreateAgentParams` | generated file | typed params include `RuntimeConfig []byte`, `Instructions string`, `CustomEnv []byte`, `CustomArgs []byte`, `Model pgtype.Text`, `ThinkingLevel pgtype.Text`, `OriginType pgtype.Text`, `OriginID pgtype.UUID` |
 | `UpdateAgent` SET | 2552–2566 | COALESCE updates of `runtime_config, instructions, custom_env, custom_args, model, thinking_level` — note `custom_env` is COALESCE-guarded but the handler rejects it before this query runs |
 | `UpdateAgentCustomEnv` (called by the `UpdateAgentEnv` handler) | 2652 | `SET custom_env = $2` — the only write path for env values |

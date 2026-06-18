@@ -378,6 +378,49 @@ describe("ApiClient schema fallback", () => {
       expect(resp.reused_skill_ids).toEqual([]);
     });
   });
+
+  describe("listProjects", () => {
+    it("falls back to an empty list when the response is malformed", async () => {
+      stubFetchJson({ projects: "not-an-array", total: 1 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listProjects();
+      expect(res).toEqual({ projects: [], total: 0 });
+    });
+
+    it("defaults project tree and trash fields when an older backend omits them", async () => {
+      stubFetchJson({
+        projects: [
+          {
+            id: "project-1",
+            workspace_id: "ws-1",
+            title: "Launch",
+            created_at: "2026-06-01T00:00:00Z",
+            updated_at: "2026-06-01T00:00:00Z",
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listProjects();
+      expect(res.projects[0]?.parent_project_id).toBeNull();
+      expect(res.projects[0]?.position).toBe(0);
+      expect(res.projects[0]?.deleted_at).toBeNull();
+      expect(res.projects[0]?.delete_expires_at).toBeNull();
+      expect(res.projects[0]?.child_count).toBe(0);
+    });
+  });
+
+  describe("quickCreateAgent", () => {
+    it("falls back to an empty task id when the response is malformed", async () => {
+      stubFetchJson({ task_id: 42 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.quickCreateAgent({
+        prompt: "Create a QA agent",
+        runtime_id: "runtime-1",
+      });
+      expect(res).toEqual({ task_id: "" });
+    });
+  });
 });
 
 // Direct tests for the helper, decoupled from any specific endpoint —

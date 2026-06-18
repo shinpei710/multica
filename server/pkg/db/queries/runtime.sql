@@ -235,18 +235,23 @@ RETURNING *;
 DELETE FROM agent_runtime WHERE id = $1;
 
 -- name: CountActiveAgentsByRuntime :one
-SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL;
+SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL AND kind = 'configured';
 
--- name: CountActiveSquadsWithArchivedLeadersByRuntime :one
+-- name: CountActiveSquadsWithNonConfiguredLeadersByRuntime :one
 SELECT count(*)
 FROM squad
 WHERE archived_at IS NULL
   AND leader_id IN (
-    SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL
+    SELECT id
+    FROM agent
+    WHERE runtime_id = $1
+      AND (archived_at IS NOT NULL OR kind <> 'configured')
   );
 
 -- name: DeleteArchivedAgentsByRuntime :exec
-DELETE FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL;
+DELETE FROM agent
+WHERE runtime_id = $1
+  AND (archived_at IS NOT NULL OR kind = 'runtime_blank');
 
 -- name: PauseAutopilotsByAgentAssignees :exec
 -- Pauses every active autopilot whose agent assignee is in the supplied list.
@@ -265,13 +270,16 @@ WHERE status = 'active'
 -- Companion to DeleteArchivedAgentsByRuntime: enumerates the archived agents
 -- about to be hard-deleted so the runtime teardown can pause autopilots that
 -- still point at them. Returns ids only — the caller only needs the set.
-SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL;
+SELECT id FROM agent
+WHERE runtime_id = $1
+  AND archived_at IS NOT NULL
+  AND kind = 'configured';
 
 -- name: DeleteSquadsByArchivedAgentsOnRuntime :exec
 -- Removes archived squads whose leader_id references an archived agent on the
 -- given runtime. Must run before DeleteArchivedAgentsByRuntime so the RESTRICT
 -- FK on squad.leader_id does not block the agent deletion. Active squads are
--- handled separately by CountActiveSquadsWithArchivedLeadersByRuntime, which
+-- handled separately by CountActiveSquadsWithNonConfiguredLeadersByRuntime, which
 -- returns a 409 until the caller archives them or assigns a new leader.
 DELETE FROM squad
 WHERE leader_id IN (

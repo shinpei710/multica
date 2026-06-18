@@ -3,6 +3,7 @@
 import { Check, FolderKanban, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { flattenProjectTree } from "./project-tree";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { UpdateIssueRequest } from "@multica/core/types";
 import {
@@ -34,6 +35,7 @@ export function ProjectPicker({
   const wsId = useWorkspaceId();
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const current = projects.find((p) => p.id === projectId);
+  const projectRows = flattenProjectTree(projects);
 
   return (
     <DropdownMenu defaultOpen={defaultOpen}>
@@ -49,10 +51,15 @@ export function ProjectPicker({
         <span className="truncate">{current ? current.title : t(($) => $.picker.no_project)}</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align={align} className="w-52">
-        {projects.map((p) => (
+        {projectRows.map(({ project: p, depth }) => (
           <DropdownMenuItem key={p.id} onClick={() => onUpdate({ project_id: p.id })}>
-            <ProjectIcon project={p} size="md" className="mr-1" />
-            <span className="truncate">{p.title}</span>
+            <span
+              className="flex min-w-0 items-center gap-1"
+              style={{ paddingLeft: depth > 0 ? Math.min(depth, 8) * 14 : 0 }}
+            >
+              <ProjectIcon project={p} size="md" className="mr-1" />
+              <span className="truncate">{p.title}</span>
+            </span>
             {p.id === projectId && <Check className="ml-auto h-3.5 w-3.5 shrink-0" />}
           </DropdownMenuItem>
         ))}

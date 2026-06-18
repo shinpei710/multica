@@ -1,0 +1,27 @@
+name: Sync fork with upstream
+
+on:
+  schedule:
+    # Daily at 19:00 UTC, which is 04:00 in Asia/Tokyo.
+    - cron: "0 19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream-main
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync main from upstream
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync fork
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh repo sync "${{ github.repository }}" \
+            --branch "main" \
+            --source "multica-ai/multica"

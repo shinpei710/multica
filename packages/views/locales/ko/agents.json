@@ -81,7 +81,8 @@
     "fallback_runtime_local": "로컬",
     "actions_aria": "행 작업",
     "task_count_one": "태스크 {{count}}개",
-    "task_count_other": "태스크 {{count}}개"
+    "task_count_other": "태스크 {{count}}개",
+    "runtime_blank": "런타임"
   },
   "activity_tooltip": {
     "created_today": "오늘 생성됨",
@@ -141,7 +142,8 @@
     "agent_archived_toast": "에이전트를 보관했습니다",
     "archive_failed_toast": "에이전트를 보관하지 못했습니다",
     "agent_restored_toast": "에이전트를 복원했습니다",
-    "restore_failed_toast": "에이전트를 복원하지 못했습니다"
+    "restore_failed_toast": "에이전트를 복원하지 못했습니다",
+    "runtime_blank_banner": "Multica가 관리하는 런타임 바로가기 에이전트입니다. 이름과 공개 범위는 런타임에서 변경하세요."
   },
   "inspector": {
     "section_properties": "속성",
@@ -411,7 +413,9 @@
       "cancel_failed_toast": "작업을 취소하지 못했습니다",
       "started_prefix": "{{when}} 시작됨",
       "dispatched_prefix": "{{when}} 디스패치됨",
-      "queued_prefix": "{{when}} 대기 시작"
+      "queued_prefix": "{{when}} 대기 시작",
+      "source_quick_create_agent": "AI 생성 에이전트",
+      "source_creating_agent": "에이전트 생성 중"
     }
   },
   "char_counter": {
@@ -499,5 +503,24 @@
     "selected_one": "{{count}}개 선택됨",
     "selected_other": "{{count}}개 선택됨",
     "clear_selection": "선택 해제"
+  },
+  "quick_create": {
+    "entry": "AI 생성",
+    "title": "AI로 에이전트 생성",
+    "description": "원하는 팀원을 설명하세요. 선택한 런타임이 설정된 에이전트를 생성합니다.",
+    "prompt_label": "에이전트 설명",
+    "prompt_placeholder": "예: UI 변경, 접근성, 명확한 후속 issue 작성을 확인하는 프론트엔드 QA 에이전트를 만들어 주세요.",
+    "visibility_label": "공개 범위",
+    "model_label": "모델",
+    "model_placeholder": "런타임 기본값",
+    "thinking_label": "사고",
+    "thinking_placeholder": "런타임 기본값",
+    "runtime_hint": "선택한 런타임이 생성 task를 실행하고 새 에이전트에도 연결됩니다.",
+    "cancel": "취소",
+    "submit": "AI로 생성",
+    "toast_sent": "에이전트 생성을 시작했습니다. 완료되면 받은함에서 알려드립니다.",
+    "toast_failed": "에이전트 생성을 시작하지 못했습니다",
+    "error_agent_unavailable_fallback": "선택한 런타임을 사용할 수 없습니다.",
+    "error_daemon_version": "AI 에이전트 생성에는 Multica CLI {{min}} 이상이 필요합니다. 현재 버전: {{current}}."
   }
 }

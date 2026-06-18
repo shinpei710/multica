@@ -79,6 +79,30 @@ func TestCheckMinCLIVersion(t *testing.T) {
 	}
 }
 
+func TestCheckMinQuickCreateAgentCLIVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr error
+	}{
+		{"tagged release at agent minimum", "v0.2.22", nil},
+		{"tagged release above agent minimum", "0.3.1", nil},
+		{"issue quick-create minimum below agent minimum", "v0.2.21", ErrCLIVersionTooOld},
+		{"empty string", "", ErrCLIVersionMissing},
+		{"unparsable", "not-a-version", ErrCLIVersionMissing},
+		{"git-describe dev build", "v0.2.21-3-gabc1234", nil},
+	}
+	for _, tt := range tests {
+		err := CheckMinQuickCreateAgentCLIVersion(tt.input)
+		if tt.wantErr == nil && err != nil {
+			t.Errorf("%s: CheckMinQuickCreateAgentCLIVersion(%q) = %v, want nil", tt.name, tt.input, err)
+		}
+		if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+			t.Errorf("%s: CheckMinQuickCreateAgentCLIVersion(%q) = %v, want %v", tt.name, tt.input, err, tt.wantErr)
+		}
+	}
+}
+
 func TestExtractVersionLine(t *testing.T) {
 	tests := []struct {
 		name string

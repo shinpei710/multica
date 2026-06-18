@@ -359,7 +359,8 @@
     "select_agent": "エージェントを選択",
     "select_assignee": "エージェントまたはスクワッドを選択",
     "agents_group": "エージェント",
-    "squads_group": "スクワッド"
+    "squads_group": "スクワッド",
+    "runtimes_group": "ランタイム"
   },
   "timezone_picker": {
     "search_placeholder": "タイムゾーンを検索..."

@@ -17,7 +17,8 @@
     "no_matches": "No projects match",
     "selected_one": "{{count}} selected",
     "selected_other": "{{count}} selected",
-    "clear_selection": "Clear selection"
+    "clear_selection": "Clear selection",
+    "trash": "Trash"
   },
   "table": {
     "name": "Name",
@@ -75,7 +76,9 @@
     "no_issues_yet": "No issues yet",
     "toast_link_copied": "Link copied",
     "toast_project_deleted": "Project deleted",
-    "toast_move_issue_failed": "Failed to move issue"
+    "toast_move_issue_failed": "Failed to move issue",
+    "section_subprojects": "Subprojects",
+    "no_subprojects": "No subprojects yet"
   },
   "resources": {
     "section_header": "Resources",
@@ -116,9 +119,12 @@
   },
   "delete_dialog": {
     "title": "Delete project",
-    "description": "This will delete the project. Issues will not be deleted but will be unlinked.",
+    "description": "This will move the project to trash. Issues stay linked and can return when the project is restored.",
     "confirm": "Delete",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "non_empty_description": "This project contains {{child_count}} subprojects and {{issue_count}} linked issues. Delete the whole project tree?",
+    "confirm_tree": "Delete project tree",
+    "restore_hint": "Projects stay recoverable for 30 days. Issues are not deleted."
   },
   "picker": {
     "no_project": "No project",
@@ -143,5 +149,17 @@
     "direction_desc": "Descending",
     "section_columns": "Columns",
     "view": "View"
+  },
+  "trash": {
+    "open": "Trash",
+    "title": "Project trash",
+    "description": "Deleted projects can be restored for 30 days. Issues return to their project after restore.",
+    "empty": "Trash is empty",
+    "restore": "Restore",
+    "days_remaining_one": "{{count}} day remaining",
+    "days_remaining_other": "{{count}} days remaining",
+    "expires_unknown": "Restore window unknown",
+    "toast_restored": "Project restored",
+    "toast_restore_failed": "Failed to restore project"
   }
 }

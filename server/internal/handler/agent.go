@@ -61,6 +61,9 @@ type AgentResponse struct {
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
 	ThinkingLevel string              `json:"thinking_level"`
+	Kind          string              `json:"kind"`
+	OriginType    *string             `json:"origin_type"`
+	OriginID      *string             `json:"origin_id"`
 	OwnerID       *string             `json:"owner_id"`
 	Skills        []AgentSkillSummary `json:"skills"`
 	CreatedAt     string              `json:"created_at"`
@@ -117,6 +120,11 @@ func agentToResponse(a db.Agent) AgentResponse {
 		mcpConfig = json.RawMessage(a.McpConfig)
 	}
 
+	kind := a.Kind
+	if kind == "" {
+		kind = "configured"
+	}
+
 	return AgentResponse{
 		ID:                 uuidToString(a.ID),
 		WorkspaceID:        uuidToString(a.WorkspaceID),
@@ -136,6 +144,9 @@ func agentToResponse(a db.Agent) AgentResponse {
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
 		Model:              a.Model.String,
 		ThinkingLevel:      a.ThinkingLevel.String,
+		Kind:               kind,
+		OriginType:         textToPtr(a.OriginType),
+		OriginID:           uuidToPtr(a.OriginID),
 		OwnerID:            uuidToPtr(a.OwnerID),
 		Skills:             []AgentSkillSummary{},
 		CreatedAt:          timestampToString(a.CreatedAt),
@@ -265,30 +276,35 @@ type AgentTaskResponse struct {
 	// when WorkDir is empty, or when stripping leaves nothing. See
 	// relativeWorkDir() for the full rules. Older clients can still read
 	// WorkDir directly; newer UIs should prefer RelativeWorkDir.
-	RelativeWorkDir          string               `json:"relative_work_dir,omitempty"`
-	TriggerCommentID         *string              `json:"trigger_comment_id,omitempty"`          // comment that triggered this task
-	TriggerThreadID          string               `json:"trigger_thread_id,omitempty"`           // root comment ID for the triggering thread
-	TriggerCommentContent    string               `json:"trigger_comment_content,omitempty"`     // content of the triggering comment
-	TriggerSummary           *string              `json:"trigger_summary,omitempty"`             // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
-	TriggerAuthorType        string               `json:"trigger_author_type,omitempty"`         // "agent" or "member" — author kind of the triggering comment
-	TriggerAuthorName        string               `json:"trigger_author_name,omitempty"`         // display name of the triggering comment author
-	NewCommentCount          int                  `json:"new_comment_count,omitempty"`           // trigger-thread comments since last run; excludes injected trigger + own comments; omitempty so old daemons ignore it
-	NewCommentsSince         string               `json:"new_comments_since,omitempty"`          // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it
-	ChatSessionID            string               `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
-	ChatMessage              string               `json:"chat_message,omitempty"`                // user message for chat tasks
-	ChatMessageAttachments   []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"`    // attachments on the user message — agent calls `multica attachment download <id>` per entry
-	AutopilotRunID           string               `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot-spawned tasks
-	AutopilotID              string               `json:"autopilot_id,omitempty"`                // autopilot that spawned this task
-	AutopilotTitle           string               `json:"autopilot_title,omitempty"`             // autopilot title used as task context
-	AutopilotDescription     string               `json:"autopilot_description,omitempty"`       // autopilot description used as task prompt
-	AutopilotSource          string               `json:"autopilot_source,omitempty"`            // manual, schedule, webhook, or api
-	AutopilotTriggerPayload  json.RawMessage      `json:"autopilot_trigger_payload,omitempty"`   // optional trigger payload for webhook/api runs
-	QuickCreatePrompt        string               `json:"quick_create_prompt,omitempty"`         // user's natural-language input for quick-create tasks
-	QuickCreateAttachmentIDs []string             `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
-	SquadID                  string               `json:"squad_id,omitempty"`                    // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
-	SquadName                string               `json:"squad_name,omitempty"`                  // display name for the picker squad
-	ParentIssueID            string               `json:"parent_issue_id,omitempty"`             // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
-	ParentIssueIdentifier    string               `json:"parent_issue_identifier,omitempty"`     // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
+	RelativeWorkDir               string               `json:"relative_work_dir,omitempty"`
+	TriggerCommentID              *string              `json:"trigger_comment_id,omitempty"`          // comment that triggered this task
+	TriggerThreadID               string               `json:"trigger_thread_id,omitempty"`           // root comment ID for the triggering thread
+	TriggerCommentContent         string               `json:"trigger_comment_content,omitempty"`     // content of the triggering comment
+	TriggerSummary                *string              `json:"trigger_summary,omitempty"`             // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
+	TriggerAuthorType             string               `json:"trigger_author_type,omitempty"`         // "agent" or "member" — author kind of the triggering comment
+	TriggerAuthorName             string               `json:"trigger_author_name,omitempty"`         // display name of the triggering comment author
+	NewCommentCount               int                  `json:"new_comment_count,omitempty"`           // trigger-thread comments since last run; excludes injected trigger + own comments; omitempty so old daemons ignore it
+	NewCommentsSince              string               `json:"new_comments_since,omitempty"`          // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it
+	ChatSessionID                 string               `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
+	ChatMessage                   string               `json:"chat_message,omitempty"`                // user message for chat tasks
+	ChatMessageAttachments        []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"`    // attachments on the user message — agent calls `multica attachment download <id>` per entry
+	AutopilotRunID                string               `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot-spawned tasks
+	AutopilotID                   string               `json:"autopilot_id,omitempty"`                // autopilot that spawned this task
+	AutopilotTitle                string               `json:"autopilot_title,omitempty"`             // autopilot title used as task context
+	AutopilotDescription          string               `json:"autopilot_description,omitempty"`       // autopilot description used as task prompt
+	AutopilotSource               string               `json:"autopilot_source,omitempty"`            // manual, schedule, webhook, or api
+	AutopilotTriggerPayload       json.RawMessage      `json:"autopilot_trigger_payload,omitempty"`   // optional trigger payload for webhook/api runs
+	QuickCreatePrompt             string               `json:"quick_create_prompt,omitempty"`         // user's natural-language input for quick-create tasks
+	QuickCreateAttachmentIDs      []string             `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
+	QuickCreateAgentPrompt        string               `json:"quick_create_agent_prompt,omitempty"`   // user's natural-language input for AI-created-agent tasks
+	QuickCreateAgentRuntimeID     string               `json:"quick_create_agent_runtime_id,omitempty"`
+	QuickCreateAgentVisibility    string               `json:"quick_create_agent_visibility,omitempty"`
+	QuickCreateAgentModel         string               `json:"quick_create_agent_model,omitempty"`
+	QuickCreateAgentThinkingLevel string               `json:"quick_create_agent_thinking_level,omitempty"`
+	SquadID                       string               `json:"squad_id,omitempty"`                // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
+	SquadName                     string               `json:"squad_name,omitempty"`              // display name for the picker squad
+	ParentIssueID                 string               `json:"parent_issue_id,omitempty"`         // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
+	ParentIssueIdentifier         string               `json:"parent_issue_identifier,omitempty"` // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
 	// RequestingUserName + RequestingUserProfileDescription mirror the user
 	// the agent is acting on behalf of (see daemon/types.go). v1 sources them
 	// from the runtime owner so they're populated for daemon runtimes and
@@ -521,6 +537,14 @@ func computeTaskKind(t db.AgentTaskQueue) string {
 		return "autopilot"
 	}
 	if uuidToString(t.IssueID) == "" {
+		if len(t.Context) > 0 {
+			var ctx struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(t.Context, &ctx) == nil && ctx.Type == service.QuickCreateAgentContextType {
+				return service.QuickCreateAgentContextType
+			}
+		}
 		return "quick_create"
 	}
 	if uuidToString(t.TriggerCommentID) != "" {
@@ -669,6 +693,8 @@ type CreateAgentRequest struct {
 	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
 	Model              string            `json:"model"`
 	ThinkingLevel      string            `json:"thinking_level"`
+	OriginType         string            `json:"origin_type"`
+	OriginID           string            `json:"origin_id"`
 	// Template records which template slug was used to seed this agent
 	// (e.g. "coding" / "planning" / "writing" / "assistant"). Empty when
 	// the caller didn't come from a template picker — the `agent_created`
@@ -768,14 +794,61 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Probe workspace agent count BEFORE the insert so the funnel has a
-	// clean "first agent ever in this workspace" signal — Step 4 of
+	var originType pgtype.Text
+	var originID pgtype.UUID
+	if req.OriginType != "" || req.OriginID != "" {
+		if req.OriginType != "quick_create_agent" {
+			writeError(w, http.StatusBadRequest, "origin_type must be quick_create_agent")
+			return
+		}
+		if req.OriginID == "" {
+			writeError(w, http.StatusBadRequest, "origin_id is required when origin_type is set")
+			return
+		}
+		originUUID, ok := parseUUIDOrBadRequest(w, req.OriginID, "origin_id")
+		if !ok {
+			return
+		}
+		actorType, _ := h.resolveActor(r, ownerID, workspaceID)
+		if actorType != "agent" {
+			writeError(w, http.StatusForbidden, "origin fields are only accepted from task-scoped agent execution")
+			return
+		}
+		currentTaskID := r.Header.Get("X-Task-ID")
+		if currentTaskID == "" || currentTaskID != req.OriginID {
+			writeError(w, http.StatusForbidden, "origin_id must match the current agent task")
+			return
+		}
+		task, err := h.Queries.GetAgentTask(r.Context(), originUUID)
+		if err != nil || uuidToString(task.AgentID) != r.Header.Get("X-Agent-ID") {
+			writeError(w, http.StatusForbidden, "origin_id does not match the current agent task")
+			return
+		}
+		var taskCtx struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(task.Context, &taskCtx); err != nil || taskCtx.Type != service.QuickCreateAgentContextType {
+			writeError(w, http.StatusBadRequest, "origin_id must refer to a quick-create-agent task")
+			return
+		}
+		originType = pgtype.Text{String: req.OriginType, Valid: true}
+		originID = originUUID
+	}
+
+	// Probe workspace configured-agent count BEFORE the insert so the funnel has a
+	// clean "first configured agent in this workspace" signal — Step 4 of
 	// onboarding always lands in this branch. A non-fatal read: if the
 	// list fails we fall through with isFirstAgent=false rather than
 	// blocking creation, since the primary DB operation is the insert.
 	isFirstAgent := false
 	if existing, listErr := h.Queries.ListAgents(r.Context(), wsUUID); listErr == nil {
-		isFirstAgent = len(existing) == 0
+		isFirstAgent = true
+		for _, agent := range existing {
+			if agent.Kind == "configured" {
+				isFirstAgent = false
+				break
+			}
+		}
 	}
 
 	// A create has no prior token to restore, so if the caller submitted the
@@ -819,6 +892,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		McpConfig:          mc,
 		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
 		ThinkingLevel:      pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
+		OriginType:         originType,
+		OriginID:           originID,
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -855,6 +930,104 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 
 	redactAgentResponseForActor(&resp, actorType)
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+type QuickCreateAgentRequest struct {
+	Prompt        string `json:"prompt"`
+	RuntimeID     string `json:"runtime_id"`
+	Visibility    string `json:"visibility"`
+	Model         string `json:"model"`
+	ThinkingLevel string `json:"thinking_level"`
+}
+
+type QuickCreateAgentResponse struct {
+	TaskID string `json:"task_id"`
+}
+
+func (h *Handler) QuickCreateAgent(w http.ResponseWriter, r *http.Request) {
+	var req QuickCreateAgentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	prompt := strings.TrimSpace(req.Prompt)
+	if prompt == "" {
+		writeError(w, http.StatusBadRequest, "prompt is required")
+		return
+	}
+	if strings.TrimSpace(req.RuntimeID) == "" {
+		writeError(w, http.StatusBadRequest, "runtime_id is required")
+		return
+	}
+	visibility := strings.TrimSpace(req.Visibility)
+	if visibility == "" {
+		visibility = "private"
+	}
+	if visibility != "private" && visibility != "workspace" {
+		writeError(w, http.StatusBadRequest, "visibility must be 'private' or 'workspace'")
+		return
+	}
+
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	requesterID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	requesterUUID, ok := parseUUIDOrBadRequest(w, requesterID, "requester_id")
+	if !ok {
+		return
+	}
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
+	if !ok {
+		return
+	}
+	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+		ID:          runtimeUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid runtime_id")
+		return
+	}
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	if !canUseRuntimeForAgent(member, runtime) {
+		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can create agents on it")
+		return
+	}
+	if runtime.Status != "online" {
+		writeAgentUnavailable(w, "runtime is offline")
+		return
+	}
+	if status, payload := h.checkQuickCreateAgentDaemonVersion(r.Context(), runtime.ID); status != 0 {
+		writeJSON(w, status, payload)
+		return
+	}
+	if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", req.ThinkingLevel, runtime.Provider))
+		return
+	}
+
+	blankAgent, err := h.ensureRuntimeBlankAgent(r.Context(), runtime, "member", requesterID)
+	if err != nil {
+		slog.Warn("quick-create-agent: ensure runtime blank agent failed", append(logger.RequestAttrs(r), "error", err, "runtime_id", req.RuntimeID)...)
+		writeError(w, http.StatusInternalServerError, "failed to prepare runtime blank agent")
+		return
+	}
+	task, err := h.TaskService.EnqueueQuickCreateAgentTask(r.Context(), wsUUID, requesterUUID, blankAgent, prompt, visibility, req.Model, req.ThinkingLevel)
+	if err != nil {
+		slog.Warn("quick-create-agent: enqueue failed", append(logger.RequestAttrs(r), "error", err, "runtime_id", req.RuntimeID)...)
+		writeError(w, http.StatusInternalServerError, "failed to queue agent create")
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, QuickCreateAgentResponse{TaskID: uuidToString(task.ID)})
 }
 
 type UpdateAgentRequest struct {
@@ -987,6 +1160,14 @@ func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent d
 	return true
 }
 
+func rejectRuntimeBlankAgentWrite(w http.ResponseWriter, agent db.Agent) bool {
+	if agent.Kind == "runtime_blank" {
+		writeError(w, http.StatusBadRequest, "runtime blank agents are managed from the runtime and cannot be edited here")
+		return true
+	}
+	return false
+}
+
 func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	existing, ok := h.loadAgentForUser(w, r, id)
@@ -994,6 +1175,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.canManageAgent(w, r, existing) {
+		return
+	}
+	if rejectRuntimeBlankAgentWrite(w, existing) {
 		return
 	}
 
@@ -1265,6 +1449,9 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 	if !h.canManageAgent(w, r, agent) {
 		return
 	}
+	if rejectRuntimeBlankAgentWrite(w, agent) {
+		return
+	}
 	if agent.ArchivedAt.Valid {
 		writeError(w, http.StatusConflict, "agent is already archived")
 		return
@@ -1312,6 +1499,9 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.canManageAgent(w, r, agent) {
+		return
+	}
+	if rejectRuntimeBlankAgentWrite(w, agent) {
 		return
 	}
 	if !agent.ArchivedAt.Valid {

@@ -73,6 +73,7 @@ export function AgentRowActions({
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
 
+  const isRuntimeBlank = (agent.kind ?? "configured") === "runtime_blank";
   const isArchived = !!agent.archived_at;
   const runningCount = presence?.runningCount ?? 0;
   const queuedCount = presence?.queuedCount ?? 0;
@@ -81,10 +82,10 @@ export function AgentRowActions({
   // Derive which menu items to render. Doing this once here keeps the JSX
   // below a flat list of conditionals rather than a tangle of role/state
   // branches.
-  const showStop = canManage && !isArchived && hasActiveWork;
-  const showDuplicate = !isArchived; // any workspace member can duplicate
-  const showArchive = canManage && !isArchived;
-  const showRestore = canManage && isArchived;
+  const showStop = canManage && !isRuntimeBlank && !isArchived && hasActiveWork;
+  const showDuplicate = !isRuntimeBlank && !isArchived; // any workspace member can duplicate
+  const showArchive = canManage && !isRuntimeBlank && !isArchived;
+  const showRestore = canManage && !isRuntimeBlank && isArchived;
 
   const hasAnyAction = showStop || showDuplicate || showArchive || showRestore;
 

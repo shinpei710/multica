@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -477,8 +478,8 @@ func TestClaimTaskByRuntime_MissingRuntimeOwnerCancelsAndRejects(t *testing.T) {
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("ClaimTaskByRuntime: expected 500, got %d: %s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "runtime owner required to mint task token") {
-		t.Fatalf("ClaimTaskByRuntime body = %q, want runtime owner error", w.Body.String())
+	if !strings.Contains(w.Body.String(), "task token owner required to mint task token") {
+		t.Fatalf("ClaimTaskByRuntime body = %q, want task token owner error", w.Body.String())
 	}
 
 	var status string
@@ -4000,5 +4001,73 @@ func TestClaimTaskByRuntime_CommentResumeDefaultOn(t *testing.T) {
 	resp := claimCommentTask(t, runtimeID, "comment-resume-default")
 	if resp.Task.PriorSessionID != priorSession {
 		t.Errorf("prior_session_id = %q, want %q (comment resume is default-on)", resp.Task.PriorSessionID, priorSession)
+	}
+}
+
+func TestClaimTaskByRuntime_QuickCreateAgentTokenUsesRequesterOwner(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeOwnerID, _ := createEphemeralMember(t, testWorkspaceID, "qca-runtime-owner", "member")
+	requesterID, _ := createEphemeralMember(t, testWorkspaceID, "qca-requester", "member")
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider,
+			status, device_info, metadata, last_seen_at, visibility, owner_id
+		)
+		VALUES ($1, NULL, 'QCA requester owner runtime', 'cloud', 'handler_test_runtime', 'online', 'qca requester owner fixture', '{}'::jsonb, now(), 'public', $2)
+		RETURNING id
+	`, testWorkspaceID, runtimeOwnerID).Scan(&runtimeID); err != nil {
+		t.Fatalf("create runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent WHERE runtime_id = $1`, runtimeID)
+		testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	blankID := createRuntimeBlankAgentForQuickCreateTest(t, runtimeID, runtimeOwnerID)
+	payload, err := json.Marshal(service.QuickCreateAgentContext{
+		Type:        service.QuickCreateAgentContextType,
+		Prompt:      "Create a support triage agent",
+		RequesterID: requesterID,
+		WorkspaceID: testWorkspaceID,
+		RuntimeID:   runtimeID,
+		Visibility:  "private",
+	})
+	if err != nil {
+		t.Fatalf("marshal context: %v", err)
+	}
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, context)
+		VALUES ($1, $2, 'queued', 10, $3)
+		RETURNING id
+	`, blankID, runtimeID, payload).Scan(&taskID); err != nil {
+		t.Fatalf("create quick-create-agent task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "qca-requester-owner")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var tokenUserID string
+	if err := testPool.QueryRow(ctx, `SELECT user_id::text FROM task_token WHERE task_id = $1`, taskID).Scan(&tokenUserID); err != nil {
+		t.Fatalf("read task token user: %v", err)
+	}
+	if tokenUserID != requesterID {
+		t.Fatalf("task token user_id = %s, want requester %s", tokenUserID, requesterID)
+	}
+	if tokenUserID == runtimeOwnerID {
+		t.Fatalf("task token user_id unexpectedly used runtime owner %s", runtimeOwnerID)
 	}
 }

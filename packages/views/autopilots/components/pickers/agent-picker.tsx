@@ -7,6 +7,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import type { AutopilotAssigneeType } from "@multica/core/types";
 import { ActorAvatar } from "../../../common/actor-avatar";
+import { splitRuntimeBlankAgents } from "../../../common/agent-kind";
 import {
   PropertyPicker,
   PickerItem,
@@ -54,6 +55,8 @@ export function AgentPicker({
   const matches = (name: string) =>
     !query || name.toLowerCase().includes(query) || matchesPinyin(name, query);
   const filteredAgents = activeAgents.filter((a) => matches(a.name));
+  const { configured: filteredConfiguredAgents, runtimes: filteredRuntimeAgents } =
+    splitRuntimeBlankAgents(filteredAgents);
   const filteredSquads = activeSquads.filter((s) => matches(s.name));
 
   const isSelected = (type: AutopilotAssigneeType, id: string) =>
@@ -97,13 +100,29 @@ export function AgentPicker({
         )
       }
     >
-      {filteredAgents.length === 0 && filteredSquads.length === 0 ? (
+      {filteredConfiguredAgents.length === 0 &&
+      filteredRuntimeAgents.length === 0 &&
+      filteredSquads.length === 0 ? (
         <PickerEmpty />
       ) : (
         <>
-          {filteredAgents.length > 0 && (
+          {filteredConfiguredAgents.length > 0 && (
             <PickerSection label={t(($) => $.agent_picker.agents_group)}>
-              {filteredAgents.map((a) => (
+              {filteredConfiguredAgents.map((a) => (
+                <PickerItem
+                  key={a.id}
+                  selected={isSelected("agent", a.id)}
+                  onClick={() => handlePick("agent", a.id)}
+                >
+                  <ActorAvatar actorType="agent" actorId={a.id} size={16} showStatusDot />
+                  <span className="truncate">{a.name}</span>
+                </PickerItem>
+              ))}
+            </PickerSection>
+          )}
+          {filteredRuntimeAgents.length > 0 && (
+            <PickerSection label={t(($) => $.agent_picker.runtimes_group)}>
+              {filteredRuntimeAgents.map((a) => (
                 <PickerItem
                   key={a.id}
                   selected={isSelected("agent", a.id)}

@@ -10,6 +10,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, squadListOptions, assigneeFrequencyOptions } from "@multica/core/workspace/queries";
 import { ActorAvatar } from "../../../common/actor-avatar";
+import { splitRuntimeBlankAgents } from "../../../common/agent-kind";
 import {
   PropertyPicker,
   PickerItem,
@@ -90,6 +91,8 @@ export function AssigneePicker({
   const filteredAgents = agents
     .filter((a) => !a.archived_at && (a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query)))
     .sort((a, b) => getFreq("agent", b.id) - getFreq("agent", a.id));
+  const { configured: filteredConfiguredAgents, runtimes: filteredRuntimeAgents } =
+    splitRuntimeBlankAgents(filteredAgents);
   const filteredSquads = squads
     .filter((s) => !s.archived_at && (s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)))
     .sort((a, b) => getFreq("squad", b.id) - getFreq("squad", a.id));
@@ -163,9 +166,49 @@ export function AssigneePicker({
       )}
 
       {/* Agents */}
-      {filteredAgents.length > 0 && (
+      {filteredConfiguredAgents.length > 0 && (
         <PickerSection label={t(($) => $.pickers.assignee.agents_group)}>
-          {filteredAgents.map((a) => {
+          {filteredConfiguredAgents.map((a) => {
+            const decision = canAssignAgentToIssue(a, {
+              userId: user?.id ?? null,
+              role:
+                memberRole === "owner" ||
+                memberRole === "admin" ||
+                memberRole === "member"
+                  ? memberRole
+                  : null,
+            });
+            const allowed = decision.allowed;
+            return (
+              <PickerItem
+                key={a.id}
+                selected={isSelected("agent", a.id)}
+                disabled={!allowed}
+                tooltip={!allowed ? decision.message : undefined}
+                onClick={() => {
+                  if (!allowed) return;
+                  onUpdate({
+                    assignee_type: "agent",
+                    assignee_id: a.id,
+                  });
+                  setOpen(false);
+                }}
+              >
+                <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
+                <span className={`truncate ${allowed ? "" : "text-muted-foreground"}`}>{a.name}</span>
+                {a.visibility === "private" && (
+                  <Lock className="ml-auto h-3 w-3 text-muted-foreground" />
+                )}
+              </PickerItem>
+            );
+          })}
+        </PickerSection>
+      )}
+
+      {/* Runtime blank agents */}
+      {filteredRuntimeAgents.length > 0 && (
+        <PickerSection label={t(($) => $.pickers.assignee.runtimes_group)}>
+          {filteredRuntimeAgents.map((a) => {
             const decision = canAssignAgentToIssue(a, {
               userId: user?.id ?? null,
               role:
@@ -226,7 +269,8 @@ export function AssigneePicker({
       )}
 
       {filteredMembers.length === 0 &&
-        filteredAgents.length === 0 &&
+        filteredConfiguredAgents.length === 0 &&
+        filteredRuntimeAgents.length === 0 &&
         filteredSquads.length === 0 &&
         filter && <PickerEmpty />}
     </PropertyPicker>

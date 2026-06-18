@@ -1990,6 +1990,14 @@ func (h *Handler) isRuntimeOnline(ctx context.Context, runtimeID pgtype.UUID) bo
 //	  "runtime_id":      "<uuid>"
 //	}
 func (h *Handler) checkQuickCreateDaemonVersion(ctx context.Context, runtimeID pgtype.UUID) (int, map[string]any) {
+	return h.checkMinDaemonCLIVersion(ctx, runtimeID, agent.MinQuickCreateCLIVersion)
+}
+
+func (h *Handler) checkQuickCreateAgentDaemonVersion(ctx context.Context, runtimeID pgtype.UUID) (int, map[string]any) {
+	return h.checkMinDaemonCLIVersion(ctx, runtimeID, agent.MinQuickCreateAgentCLIVersion)
+}
+
+func (h *Handler) checkMinDaemonCLIVersion(ctx context.Context, runtimeID pgtype.UUID, minVersion string) (int, map[string]any) {
 	rt, err := h.Queries.GetAgentRuntime(ctx, runtimeID)
 	if err != nil {
 		// Runtime row vanished between the online check and here — treat
@@ -2000,14 +2008,14 @@ func (h *Handler) checkQuickCreateDaemonVersion(ctx context.Context, runtimeID p
 		}
 	}
 	current := readRuntimeCLIVersion(rt.Metadata)
-	switch err := agent.CheckMinCLIVersion(current); {
+	switch err := checkMinCLIVersionForRequirement(current, minVersion); {
 	case err == nil:
 		return 0, nil
 	case errors.Is(err, agent.ErrCLIVersionMissing), errors.Is(err, agent.ErrCLIVersionTooOld):
 		return http.StatusUnprocessableEntity, map[string]any{
 			"code":            "daemon_version_unsupported",
 			"current_version": current,
-			"min_version":     agent.MinQuickCreateCLIVersion,
+			"min_version":     minVersion,
 			"runtime_id":      uuidToString(runtimeID),
 		}
 	default:
@@ -2017,10 +2025,17 @@ func (h *Handler) checkQuickCreateDaemonVersion(ctx context.Context, runtimeID p
 		return http.StatusUnprocessableEntity, map[string]any{
 			"code":            "daemon_version_unsupported",
 			"current_version": current,
-			"min_version":     agent.MinQuickCreateCLIVersion,
+			"min_version":     minVersion,
 			"runtime_id":      uuidToString(runtimeID),
 		}
 	}
+}
+
+func checkMinCLIVersionForRequirement(current, minVersion string) error {
+	if minVersion == agent.MinQuickCreateAgentCLIVersion {
+		return agent.CheckMinQuickCreateAgentCLIVersion(current)
+	}
+	return agent.CheckMinCLIVersion(current)
 }
 
 // readRuntimeCLIVersion pulls metadata.cli_version off a runtime row. The

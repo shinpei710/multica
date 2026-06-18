@@ -28,6 +28,7 @@ import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { formatShortcut, modKey, enterKey } from "@multica/core/platform";
 import { contentReferencesAttachment, type Agent, type Attachment, type Squad } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
+import { splitRuntimeBlankAgents } from "../common/agent-kind";
 import { PillButton } from "../common/pill-button";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
@@ -609,6 +610,10 @@ function ActorPicker({
     () => visibleAgents.filter((a) => a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query)),
     [visibleAgents, query],
   );
+  const { configured: filteredConfiguredAgents, runtimes: filteredRuntimeAgents } = useMemo(
+    () => splitRuntimeBlankAgents(filteredAgents),
+    [filteredAgents],
+  );
   const filteredSquads = useMemo(
     () => visibleSquads.filter((s) => s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)),
     [visibleSquads, query],
@@ -651,7 +656,9 @@ function ActorPicker({
         </span>
       }
     >
-      {filteredAgents.length === 0 && filteredSquads.length === 0 ? (
+      {filteredConfiguredAgents.length === 0 &&
+      filteredRuntimeAgents.length === 0 &&
+      filteredSquads.length === 0 ? (
         query ? (
           <PickerEmpty />
         ) : (
@@ -661,9 +668,26 @@ function ActorPicker({
         )
       ) : (
         <>
-          {filteredAgents.length > 0 && (
+          {filteredConfiguredAgents.length > 0 && (
             <PickerSection label={t(($) => $.create_issue.agent.agents_group)}>
-              {filteredAgents.map((a) => (
+              {filteredConfiguredAgents.map((a) => (
+                <PickerItem
+                  key={a.id}
+                  selected={actor?.type === "agent" && actor.id === a.id}
+                  onClick={() => {
+                    onPick({ type: "agent", id: a.id });
+                    setOpen(false);
+                  }}
+                >
+                  <ActorAvatar actorType="agent" actorId={a.id} size={18} />
+                  <span className="truncate">{a.name}</span>
+                </PickerItem>
+              ))}
+            </PickerSection>
+          )}
+          {filteredRuntimeAgents.length > 0 && (
+            <PickerSection label={t(($) => $.create_issue.agent.runtimes_group)}>
+              {filteredRuntimeAgents.map((a) => (
                 <PickerItem
                   key={a.id}
                   selected={actor?.type === "agent" && actor.id === a.id}

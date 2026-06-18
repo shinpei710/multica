@@ -359,7 +359,8 @@
     "select_agent": "에이전트 선택",
     "select_assignee": "에이전트 또는 스쿼드 선택",
     "agents_group": "에이전트",
-    "squads_group": "스쿼드"
+    "squads_group": "스쿼드",
+    "runtimes_group": "런타임"
   },
   "timezone_picker": {
     "search_placeholder": "시간대 검색..."

@@ -20,8 +20,9 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
-    instructions, custom_env, custom_args, mcp_config, model, thinking_level
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+    instructions, custom_env, custom_args, mcp_config, model, thinking_level,
+    origin_type, origin_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 RETURNING *;
 
 -- name: UpdateAgent :one
@@ -75,13 +76,15 @@ WHERE id = $1
 RETURNING *;
 
 -- name: ArchiveAgentsByRuntime :many
--- Bulk-archives every active agent bound to any runtime in the given set.
--- Used when revoking a leaving member's runtimes so agents pinned to those
--- runtimes can no longer be assigned new work. Returns the affected rows so
--- the caller can broadcast agent:archived per agent.
+-- Bulk-archives every active configured agent bound to any runtime in the
+-- given set. Runtime blank agents are system-maintained runtime companions,
+-- so they must not be archived or broadcast as user-managed agents when a
+-- member's runtimes are revoked.
 UPDATE agent
 SET archived_at = now(), archived_by = @archived_by, updated_at = now()
-WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND archived_at IS NULL
+WHERE runtime_id = ANY(@runtime_ids::uuid[])
+  AND archived_at IS NULL
+  AND kind = 'configured'
 RETURNING *;
 
 -- name: ArchiveAgentsByIDs :many
@@ -106,7 +109,7 @@ RETURNING *;
 -- and so the cascade endpoint's expected_active_agent_ids check has a stable
 -- snapshot to compare against. Ordered by name for a deterministic display.
 SELECT * FROM agent
-WHERE runtime_id = $1 AND archived_at IS NULL
+WHERE runtime_id = $1 AND archived_at IS NULL AND kind = 'configured'
 ORDER BY name ASC;
 
 -- name: ListActiveAgentsByRuntimeForUpdate :many
@@ -119,7 +122,7 @@ ORDER BY name ASC;
 -- that the set we compared against expected_active_agent_ids is exactly
 -- the set ArchiveAgentsByIDs will operate on — no race window.
 SELECT * FROM agent
-WHERE runtime_id = $1 AND archived_at IS NULL
+WHERE runtime_id = $1 AND archived_at IS NULL AND kind = 'configured'
 ORDER BY name ASC
 FOR UPDATE;
 
@@ -690,4 +693,36 @@ SET status = CASE WHEN EXISTS (
 ) THEN 'working' ELSE 'idle' END,
     updated_at = now()
 WHERE a.id = $1
+RETURNING *;
+
+-- name: GetAgentByOrigin :one
+SELECT * FROM agent
+WHERE workspace_id = $1 AND origin_type = $2 AND origin_id = $3
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: GetRuntimeBlankAgentByRuntime :one
+SELECT * FROM agent
+WHERE runtime_id = $1 AND kind = 'runtime_blank';
+
+-- name: UpsertRuntimeBlankAgent :one
+INSERT INTO agent (
+    workspace_id, name, description, avatar_url, runtime_mode,
+    runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
+    instructions, custom_env, custom_args, mcp_config, model, thinking_level,
+    kind
+) VALUES (
+    $1, $2, '', NULL, $3, '{}', $4, $5, 6, $6,
+    '', '{}', '[]', NULL, NULL, NULL, 'runtime_blank'
+)
+ON CONFLICT (runtime_id) WHERE kind = 'runtime_blank' AND runtime_id IS NOT NULL
+DO UPDATE SET
+    workspace_id = EXCLUDED.workspace_id,
+    name = EXCLUDED.name,
+    runtime_mode = EXCLUDED.runtime_mode,
+    visibility = EXCLUDED.visibility,
+    owner_id = EXCLUDED.owner_id,
+    archived_at = NULL,
+    archived_by = NULL,
+    updated_at = now()
 RETURNING *;

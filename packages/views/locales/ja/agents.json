@@ -72,7 +72,8 @@
     "fallback_runtime_local": "ローカル",
     "actions_aria": "行の操作",
     "task_count_one": "{{count}} 件のタスク",
-    "task_count_other": "{{count}} 件のタスク"
+    "task_count_other": "{{count}} 件のタスク",
+    "runtime_blank": "ランタイム"
   },
   "activity_tooltip": {
     "created_today": "今日作成",
@@ -128,7 +129,8 @@
     "agent_archived_toast": "エージェントをアーカイブしました",
     "archive_failed_toast": "エージェントをアーカイブできませんでした",
     "agent_restored_toast": "エージェントを復元しました",
-    "restore_failed_toast": "エージェントを復元できませんでした"
+    "restore_failed_toast": "エージェントを復元できませんでした",
+    "runtime_blank_banner": "これは Multica が管理するランタイムのショートカットエージェントです。名前や公開範囲はランタイム側で変更してください。"
   },
   "inspector": {
     "section_properties": "プロパティ",
@@ -393,7 +395,9 @@
       "cancel_failed_toast": "タスクをキャンセルできませんでした",
       "started_prefix": "{{when}} に開始",
       "dispatched_prefix": "{{when}} にディスパッチ",
-      "queued_prefix": "{{when}} に待機開始"
+      "queued_prefix": "{{when}} に待機開始",
+      "source_quick_create_agent": "AI 作成エージェント",
+      "source_creating_agent": "エージェント作成中"
     }
   },
   "char_counter": {
@@ -487,5 +491,24 @@
     "selected_one": "{{count}} 件選択中",
     "selected_other": "{{count}} 件選択中",
     "clear_selection": "選択を解除"
+  },
+  "quick_create": {
+    "entry": "AI 作成",
+    "title": "AI でエージェントを作成",
+    "description": "必要なチームメイトを説明してください。選択したランタイムが設定済みエージェントを作成します。",
+    "prompt_label": "エージェント概要",
+    "prompt_placeholder": "例: UI 変更、アクセシビリティ、明確なフォローアップ issue を確認するフロントエンド QA エージェントを作成してください。",
+    "visibility_label": "公開範囲",
+    "model_label": "モデル",
+    "model_placeholder": "ランタイム既定",
+    "thinking_label": "思考",
+    "thinking_placeholder": "ランタイム既定",
+    "runtime_hint": "選択したランタイムが生成タスクを実行し、新しいエージェントにも紐づきます。",
+    "cancel": "キャンセル",
+    "submit": "AI で作成",
+    "toast_sent": "エージェント作成を開始しました。完了すると受信箱に通知されます。",
+    "toast_failed": "エージェント作成を開始できませんでした",
+    "error_agent_unavailable_fallback": "選択したランタイムは利用できません。",
+    "error_daemon_version": "AI エージェント作成には Multica CLI {{min}} 以降が必要です。現在のバージョン: {{current}}。"
   }
 }

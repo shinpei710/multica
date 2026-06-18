@@ -2112,6 +2112,9 @@ func (h *Handler) SetAgentSkills(w http.ResponseWriter, r *http.Request) {
 	if !h.canManageAgent(w, r, agent) {
 		return
 	}
+	if rejectRuntimeBlankAgentWrite(w, agent) {
+		return
+	}
 
 	var req SetAgentSkillsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -2165,6 +2168,9 @@ func (h *Handler) AddAgentSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.canManageAgent(w, r, agent) {
+		return
+	}
+	if rejectRuntimeBlankAgentWrite(w, agent) {
 		return
 	}
 

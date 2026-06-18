@@ -13,6 +13,10 @@ import type {
   CancelTaskResponse,
   CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
+  ListProjectsResponse,
+  Project,
+  QuickCreateAgentResponse,
+  SearchProjectsResponse,
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
   ListIssuesResponse,
@@ -276,6 +280,75 @@ export const EMPTY_GROUPED_ISSUES_RESPONSE: GroupedIssuesResponse = {
   groups: [],
 };
 
+export const ProjectSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  title: z.string(),
+  description: z.string().nullable().optional().transform((v) => v ?? null),
+  icon: z.string().nullable().optional().transform((v) => v ?? null),
+  status: z.string().default("planned"),
+  priority: z.string().default("none"),
+  lead_type: z.string().nullable().optional().transform((v) => v ?? null),
+  lead_id: z.string().nullable().optional().transform((v) => v ?? null),
+  parent_project_id: z.string().nullable().optional().transform((v) => v ?? null),
+  position: z.number().default(0),
+  deleted_at: z.string().nullable().optional().transform((v) => v ?? null),
+  delete_expires_at: z.string().nullable().optional().transform((v) => v ?? null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  issue_count: z.number().default(0),
+  child_count: z.number().default(0),
+  done_count: z.number().default(0),
+  resource_count: z.number().default(0),
+}).loose();
+
+export const ListProjectsResponseSchema = z.object({
+  projects: z.array(ProjectSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_PROJECTS_RESPONSE: ListProjectsResponse = {
+  projects: [],
+  total: 0,
+};
+
+export const EMPTY_PROJECT: Project = {
+  id: "",
+  workspace_id: "",
+  title: "",
+  description: null,
+  icon: null,
+  status: "planned",
+  priority: "none",
+  lead_type: null,
+  lead_id: null,
+  parent_project_id: null,
+  position: 0,
+  deleted_at: null,
+  delete_expires_at: null,
+  created_at: "",
+  updated_at: "",
+  issue_count: 0,
+  child_count: 0,
+  done_count: 0,
+  resource_count: 0,
+};
+
+const SearchProjectResultSchema = ProjectSchema.safeExtend({
+  match_source: z.string().default("title"),
+  matched_snippet: z.string().optional(),
+}).loose();
+
+export const SearchProjectsResponseSchema = z.object({
+  projects: z.array(SearchProjectResultSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
+  projects: [],
+  total: 0,
+};
+
 const SubscriberSchema = z.object({
   issue_id: z.string(),
   user_type: z.string(),
@@ -498,6 +571,75 @@ export const EMPTY_CANCEL_TASK_RESPONSE: CancelTaskResponse = {
 };
 
 // ---------------------------------------------------------------------------
+
+const AgentSkillSummarySchema = z.object({
+  id: z.string(),
+  name: z.string().default(""),
+  description: z.string().default(""),
+}).loose();
+
+export const AgentSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  runtime_id: z.string().default(""),
+  name: z.string().default(""),
+  description: z.string().default(""),
+  instructions: z.string().default(""),
+  avatar_url: z.string().nullable().optional().transform((v) => v ?? null),
+  runtime_mode: z.string().default("cloud"),
+  runtime_config: z.record(z.string(), z.unknown()).default({}),
+  custom_args: z.array(z.string()).default([]),
+  has_custom_env: z.boolean().optional(),
+  custom_env_key_count: z.number().optional(),
+  mcp_config: z.unknown().nullable().optional(),
+  mcp_config_redacted: z.boolean().optional(),
+  visibility: z.string().default("private"),
+  status: z.string().default("offline"),
+  kind: z.string().optional().default("configured"),
+  origin_type: z.string().nullable().optional().transform((v) => v ?? null),
+  origin_id: z.string().nullable().optional().transform((v) => v ?? null),
+  max_concurrent_tasks: z.number().default(1),
+  model: z.string().default(""),
+  thinking_level: z.string().optional().default(""),
+  owner_id: z.string().nullable().optional().transform((v) => v ?? null),
+  skills: z.array(AgentSkillSummarySchema).default([]),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  archived_at: z.string().nullable().optional().transform((v) => v ?? null),
+  archived_by: z.string().nullable().optional().transform((v) => v ?? null),
+}).loose();
+
+export const AgentListSchema = z.array(AgentSchema);
+
+export const EMPTY_AGENT: Agent = {
+  id: "",
+  workspace_id: "",
+  runtime_id: "",
+  name: "",
+  description: "",
+  instructions: "",
+  avatar_url: null,
+  runtime_mode: "cloud",
+  runtime_config: {},
+  custom_args: [],
+  visibility: "private",
+  status: "offline",
+  kind: "configured",
+  origin_type: null,
+  origin_id: null,
+  max_concurrent_tasks: 1,
+  model: "",
+  thinking_level: "",
+  owner_id: null,
+  skills: [],
+  created_at: "",
+  updated_at: "",
+  archived_at: null,
+  archived_by: null,
+};
+
+export const EMPTY_AGENT_LIST: Agent[] = [];
+
 // Agent template catalog — `/api/agent-templates*` and the
 // create-from-template response. The desktop app's create-agent picker
 // reaches these endpoints, and a future server change to the template shape
@@ -581,6 +723,14 @@ export const EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE: CreateAgentFromTemplateR
   agent: { id: "" } as Agent,
   imported_skill_ids: [],
   reused_skill_ids: [],
+};
+
+export const QuickCreateAgentResponseSchema = z.object({
+  task_id: z.string().default(""),
+}).loose();
+
+export const EMPTY_QUICK_CREATE_AGENT_RESPONSE: QuickCreateAgentResponse = {
+  task_id: "",
 };
 
 // Squad list responses carry lightweight membership previews used by hover

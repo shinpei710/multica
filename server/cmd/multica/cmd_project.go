@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -49,6 +51,19 @@ var projectDeleteCmd = &cobra.Command{
 	Short: "Delete a project",
 	Args:  exactArgs(1),
 	RunE:  runProjectDelete,
+}
+
+var projectTrashCmd = &cobra.Command{
+	Use:   "trash",
+	Short: "List deleted projects that can be restored",
+	RunE:  runProjectTrash,
+}
+
+var projectRestoreCmd = &cobra.Command{
+	Use:   "restore <id>",
+	Short: "Restore a deleted project tree",
+	Args:  exactArgs(1),
+	RunE:  runProjectRestore,
 }
 
 var projectStatusCmd = &cobra.Command{
@@ -113,6 +128,8 @@ func init() {
 	projectCmd.AddCommand(projectCreateCmd)
 	projectCmd.AddCommand(projectUpdateCmd)
 	projectCmd.AddCommand(projectDeleteCmd)
+	projectCmd.AddCommand(projectTrashCmd)
+	projectCmd.AddCommand(projectRestoreCmd)
 	projectCmd.AddCommand(projectStatusCmd)
 	projectCmd.AddCommand(projectResourceCmd)
 
@@ -135,6 +152,8 @@ func init() {
 	projectCreateCmd.Flags().String("status", "", "Project status")
 	projectCreateCmd.Flags().String("icon", "", "Project icon (emoji)")
 	projectCreateCmd.Flags().String("lead", "", "Lead name (member or agent)")
+	projectCreateCmd.Flags().String("parent", "", "Parent project id or prefix")
+	projectCreateCmd.Flags().Float64("position", 0, "Display position within the parent")
 	projectCreateCmd.Flags().StringArray("repo", nil, "Attach a github_repo resource by URL (may be repeated)")
 	projectCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -177,10 +196,19 @@ func init() {
 	projectUpdateCmd.Flags().String("status", "", "New status")
 	projectUpdateCmd.Flags().String("icon", "", "New icon (emoji)")
 	projectUpdateCmd.Flags().String("lead", "", "New lead name (member or agent)")
+	projectUpdateCmd.Flags().String("parent", "", "New parent project id or prefix")
+	projectUpdateCmd.Flags().Bool("clear-parent", false, "Move the project to the top level")
+	projectUpdateCmd.Flags().Float64("position", 0, "New display position within the parent")
 	projectUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// project delete
 	projectDeleteCmd.Flags().String("output", "json", "Output format: table or json")
+	projectDeleteCmd.Flags().Bool("confirm", false, "Confirm deleting a non-empty project tree")
+
+	// project trash / restore
+	projectTrashCmd.Flags().String("output", "table", "Output format: table or json")
+	projectTrashCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
+	projectRestoreCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// project status
 	projectStatusCmd.Flags().String("output", "table", "Output format: table or json")
@@ -226,27 +254,7 @@ func runProjectList(cmd *cobra.Command, _ []string) error {
 
 	fullID, _ := cmd.Flags().GetBool("full-id")
 	actors := loadActorDisplayLookup(ctx, client)
-	headers := []string{"ID", "TITLE", "STATUS", "LEAD", "CREATED"}
-	rows := make([][]string, 0, len(projectsRaw))
-	for _, raw := range projectsRaw {
-		p, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		lead := formatLead(p, actors)
-		created := strVal(p, "created_at")
-		if len(created) >= 10 {
-			created = created[:10]
-		}
-		rows = append(rows, []string{
-			displayID(strVal(p, "id"), fullID),
-			strVal(p, "title"),
-			strVal(p, "status"),
-			lead,
-			created,
-		})
-	}
-	cli.PrintTable(os.Stdout, headers, rows)
+	cli.PrintTable(os.Stdout, []string{"ID", "TITLE", "STATUS", "LEAD", "CREATED"}, projectTableRows(projectsRaw, fullID, actors))
 	return nil
 }
 
@@ -330,6 +338,17 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 		}
 		body["lead_type"] = aType
 		body["lead_id"] = aID
+	}
+	if v, _ := cmd.Flags().GetString("parent"); v != "" {
+		parentRef, resolveErr := resolveProjectID(ctx, client, v)
+		if resolveErr != nil {
+			return fmt.Errorf("resolve parent project: %w", resolveErr)
+		}
+		body["parent_project_id"] = parentRef.ID
+	}
+	if cmd.Flags().Changed("position") {
+		v, _ := cmd.Flags().GetFloat64("position")
+		body["position"] = v
 	}
 
 	// Bundle resources into the create payload so the server attaches them in
@@ -416,9 +435,27 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 		body["lead_type"] = aType
 		body["lead_id"] = aID
 	}
+	if cmd.Flags().Changed("parent") && cmd.Flags().Changed("clear-parent") {
+		return fmt.Errorf("--parent and --clear-parent are mutually exclusive")
+	}
+	if cmd.Flags().Changed("parent") {
+		v, _ := cmd.Flags().GetString("parent")
+		parentRef, resolveErr := resolveProjectID(ctx, client, v)
+		if resolveErr != nil {
+			return fmt.Errorf("resolve parent project: %w", resolveErr)
+		}
+		body["parent_project_id"] = parentRef.ID
+	}
+	if clearParent, _ := cmd.Flags().GetBool("clear-parent"); clearParent {
+		body["parent_project_id"] = nil
+	}
+	if cmd.Flags().Changed("position") {
+		v, _ := cmd.Flags().GetFloat64("position")
+		body["position"] = v
+	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead")
+		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead, --parent, --clear-parent")
 	}
 
 	var result map[string]any
@@ -455,12 +492,85 @@ func runProjectDelete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve project: %w", err)
 	}
 
-	if err := client.DeleteJSON(ctx, "/api/projects/"+projectRef.ID); err != nil {
+	path := "/api/projects/" + projectRef.ID
+	if confirm, _ := cmd.Flags().GetBool("confirm"); confirm {
+		path += "?confirm=true"
+	}
+	if err := client.DeleteJSON(ctx, path); err != nil {
+		if payload, ok := projectNotEmptyConflict(err); ok {
+			return fmt.Errorf("project is not empty (%d subprojects, %d linked issues); re-run with --confirm to move the whole project tree to trash", payload.ChildCount, payload.IssueCount)
+		}
 		return fmt.Errorf("delete project: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Project %s deleted.\n", projectRef.Display)
+	fmt.Fprintf(os.Stderr, "Project %s moved to trash.\n", projectRef.Display)
 	return nil
+}
+
+func runProjectTrash(cmd *cobra.Command, _ []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var result map[string]any
+	if err := client.GetJSON(ctx, "/api/projects/trash", &result); err != nil {
+		return fmt.Errorf("list project trash: %w", err)
+	}
+	projectsRaw, _ := result["projects"].([]any)
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, projectsRaw)
+	}
+
+	fullID, _ := cmd.Flags().GetBool("full-id")
+	headers := []string{"ID", "TITLE", "DELETED", "EXPIRES"}
+	rows := make([][]string, 0, len(projectsRaw))
+	for _, raw := range projectsRaw {
+		p, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		rows = append(rows, []string{
+			displayID(strVal(p, "id"), fullID),
+			strVal(p, "title"),
+			shortDateString(strVal(p, "deleted_at")),
+			shortDateString(strVal(p, "delete_expires_at")),
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runProjectRestore(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	projectRef, err := resolveDeletedProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve deleted project: %w", err)
+	}
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/projects/"+projectRef.ID+"/restore", map[string]any{}, &result); err != nil {
+		return fmt.Errorf("restore project: %w", err)
+	}
+	projectsRaw, _ := result["projects"].([]any)
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		actors := loadActorDisplayLookup(ctx, client)
+		cli.PrintTable(os.Stdout, []string{"ID", "TITLE", "STATUS", "LEAD", "CREATED"}, projectTableRows(projectsRaw, true, actors))
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
 }
 
 func runProjectStatus(cmd *cobra.Command, args []string) error {
@@ -497,6 +607,27 @@ func runProjectStatus(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 	return nil
+}
+
+type projectNotEmptyPayload struct {
+	Code       string `json:"code"`
+	ChildCount int64  `json:"child_count"`
+	IssueCount int64  `json:"issue_count"`
+}
+
+func projectNotEmptyConflict(err error) (projectNotEmptyPayload, bool) {
+	var httpErr *cli.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusConflict {
+		return projectNotEmptyPayload{}, false
+	}
+	var payload projectNotEmptyPayload
+	if json.Unmarshal([]byte(httpErr.Body), &payload) != nil {
+		return projectNotEmptyPayload{}, false
+	}
+	if payload.Code != "project_not_empty" {
+		return projectNotEmptyPayload{}, false
+	}
+	return payload, true
 }
 
 // ---------------------------------------------------------------------------
@@ -900,4 +1031,94 @@ func formatLead(project map[string]any, actors actorDisplayLookup) string {
 		return ""
 	}
 	return actors.actor(lType, lID)
+}
+
+func projectTableRows(projectsRaw []any, fullID bool, actors actorDisplayLookup) [][]string {
+	depths := projectDepths(projectsRaw)
+	rows := make([][]string, 0, len(projectsRaw))
+	for _, raw := range projectsRaw {
+		p, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		id := strVal(p, "id")
+		title := strVal(p, "title")
+		if depth := depths[id]; depth > 0 {
+			title = strings.Repeat("  ", depth) + "↳ " + title
+		}
+		rows = append(rows, []string{
+			displayID(id, fullID),
+			title,
+			strVal(p, "status"),
+			formatLead(p, actors),
+			shortDateString(strVal(p, "created_at")),
+		})
+	}
+	return rows
+}
+
+func projectDepths(projectsRaw []any) map[string]int {
+	parentByID := map[string]string{}
+	for _, raw := range projectsRaw {
+		p, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		id := strVal(p, "id")
+		if id == "" {
+			continue
+		}
+		parentByID[id] = strVal(p, "parent_project_id")
+	}
+	depths := map[string]int{}
+	var depthOf func(id string, seen map[string]bool) int
+	depthOf = func(id string, seen map[string]bool) int {
+		if depth, ok := depths[id]; ok {
+			return depth
+		}
+		parentID := parentByID[id]
+		if parentID == "" || seen[id] {
+			depths[id] = 0
+			return 0
+		}
+		seen[id] = true
+		depths[id] = depthOf(parentID, seen) + 1
+		return depths[id]
+	}
+	for id := range parentByID {
+		depthOf(id, map[string]bool{})
+	}
+	return depths
+}
+
+func shortDateString(value string) string {
+	if len(value) >= 10 {
+		return value[:10]
+	}
+	return value
+}
+
+func resolveDeletedProjectID(ctx context.Context, client *cli.APIClient, input string) (resolvedID, error) {
+	return resolveIDByPrefix(ctx, client, "deleted project", input, fetchDeletedProjectCandidates)
+}
+
+func fetchDeletedProjectCandidates(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
+	var result map[string]any
+	if err := client.GetJSON(ctx, "/api/projects/trash", &result); err != nil {
+		return nil, err
+	}
+	projectsRaw, _ := result["projects"].([]any)
+	candidates := make([]idCandidate, 0, len(projectsRaw))
+	for _, raw := range projectsRaw {
+		p, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		candidates = append(candidates, idCandidate{
+			ID:      strVal(p, "id"),
+			Display: strVal(p, "title"),
+			Detail:  shortDateString(strVal(p, "deleted_at")),
+		})
+	}
+	return candidates, nil
 }

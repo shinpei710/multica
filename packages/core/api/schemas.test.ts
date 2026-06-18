@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  AgentListSchema,
+  AgentSchema,
   AppConfigSchema,
   DashboardAgentRunTimeListSchema,
   DashboardUsageByAgentListSchema,
@@ -303,6 +305,63 @@ describe("dashboard + runtime usage schema drift", () => {
       { date: "2026-05-19", region: "us-east" },
     ]);
     expect((parsed[0] as Record<string, unknown>).region).toBe("us-east");
+  });
+});
+
+
+describe("AgentSchema", () => {
+  const baseAgent = {
+    id: "agent-1",
+    workspace_id: "ws-1",
+    runtime_id: "runtime-1",
+    name: "Runtime shortcut",
+    description: "",
+    instructions: "",
+    avatar_url: null,
+    runtime_mode: "cloud",
+    runtime_config: {},
+    custom_args: [],
+    visibility: "workspace",
+    status: "idle",
+    max_concurrent_tasks: 1,
+    model: "",
+    owner_id: null,
+    skills: [],
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    archived_at: null,
+    archived_by: null,
+  };
+
+  it("defaults runtime blank metadata for older agent responses", () => {
+    const parsed = AgentSchema.parse(baseAgent);
+    expect(parsed.kind).toBe("configured");
+    expect(parsed.origin_type).toBeNull();
+    expect(parsed.origin_id).toBeNull();
+    expect(parsed.thinking_level).toBe("");
+  });
+
+  it("keeps runtime_blank and origin fields when present", () => {
+    const parsed = AgentSchema.parse({
+      ...baseAgent,
+      kind: "runtime_blank",
+      origin_type: "quick_create_agent",
+      origin_id: "task-1",
+    });
+    expect(parsed.kind).toBe("runtime_blank");
+    expect(parsed.origin_type).toBe("quick_create_agent");
+    expect(parsed.origin_id).toBe("task-1");
+  });
+
+  it("falls back for malformed list responses instead of throwing into UI code", () => {
+    const fallback: [] = [];
+    const parsed = parseWithFallback(
+      [{ workspace_id: "ws-1" }],
+      AgentListSchema,
+      fallback,
+      { endpoint: "GET /api/agents" },
+    );
+    expect(parsed).toBe(fallback);
   });
 });
 

@@ -32,7 +32,7 @@ type AgentRuntimeResponse struct {
 	// Visibility is "private" (default — only the owner / workspace admins
 	// can bind agents) or "public" (any workspace member can). See migration
 	// 083 and canUseRuntimeForAgent.
-	Visibility string  `json:"visibility"`
+	Visibility string `json:"visibility"`
 	// ProfileID is set when this runtime is an instance of a custom
 	// runtime_profile (MUL-3284); null for built-in runtimes.
 	ProfileID  *string `json:"profile_id"`
@@ -68,6 +68,31 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		CreatedAt:    timestampToString(rt.CreatedAt),
 		UpdatedAt:    timestampToString(rt.UpdatedAt),
 	}
+}
+
+func (h *Handler) ensureRuntimeBlankAgent(ctx context.Context, rt db.AgentRuntime, actorType, actorID string) (db.Agent, error) {
+	blank, err := h.Queries.UpsertRuntimeBlankAgent(ctx, db.UpsertRuntimeBlankAgentParams{
+		WorkspaceID: rt.WorkspaceID,
+		Name:        rt.Name,
+		RuntimeMode: rt.RuntimeMode,
+		RuntimeID:   rt.ID,
+		Visibility:  runtimeVisibilityToAgentVisibility(rt.Visibility),
+		OwnerID:     rt.OwnerID,
+	})
+	if err != nil {
+		return db.Agent{}, err
+	}
+	h.publish(protocol.EventAgentStatus, uuidToString(rt.WorkspaceID), actorType, actorID, map[string]any{
+		"agent": broadcastAgentResponse(agentToResponse(blank)),
+	})
+	return blank, nil
+}
+
+func runtimeVisibilityToAgentVisibility(visibility string) string {
+	if visibility == "public" {
+		return "workspace"
+	}
+	return "private"
 }
 
 // ---------------------------------------------------------------------------
@@ -467,6 +492,9 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		rt = updated
+		if _, err := h.ensureRuntimeBlankAgent(r.Context(), rt, "member", uuidToString(member.UserID)); err != nil {
+			slog.Warn("UpdateAgentRuntime: ensure runtime blank agent failed", "error", err, "runtime_id", runtimeID)
+		}
 		// Notify connected clients that runtime metadata changed so the
 		// list/detail pages refresh — matches the pattern used by
 		// DeleteAgentRuntime.
@@ -583,14 +611,14 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Refuse before any teardown-side effects if the runtime still has active
-	// squads whose leader is already archived on this runtime.
-	activeSquadCount, err := h.Queries.CountActiveSquadsWithArchivedLeadersByRuntime(r.Context(), rt.ID)
+	// squads whose leader cannot remain after runtime teardown.
+	activeSquadCount, err := h.Queries.CountActiveSquadsWithNonConfiguredLeadersByRuntime(r.Context(), rt.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check runtime squad dependencies")
 		return
 	}
 	if activeSquadCount > 0 {
-		writeError(w, http.StatusConflict, "cannot delete runtime: it has active squads led by archived agents. Archive those squads or assign them a new leader first.")
+		writeError(w, http.StatusConflict, "cannot delete runtime: it has active squads led by archived or runtime-managed agents. Archive those squads or assign them a new leader first.")
 		return
 	}
 

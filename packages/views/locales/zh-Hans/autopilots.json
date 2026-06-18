@@ -359,7 +359,8 @@
     "select_agent": "选择智能体",
     "select_assignee": "选择智能体或小队",
     "agents_group": "智能体",
-    "squads_group": "小队"
+    "squads_group": "小队",
+    "runtimes_group": "运行时"
   },
   "timezone_picker": {
     "search_placeholder": "搜索时区..."

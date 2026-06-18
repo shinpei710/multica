@@ -121,7 +121,8 @@
     "local_clear": "クリア",
     "local_pick_failed": "ディレクトリ選択画面を開けませんでした。",
     "local_invalid_dir": "このディレクトリは使用できません。別のものを選択してください。",
-    "local_hint": "他のマシンのエージェントはこのパスを参照できず、起動に失敗します。共有作業にはリポジトリを使用してください。"
+    "local_hint": "他のマシンのエージェントはこのパスを参照できず、起動に失敗します。共有作業にはリポジトリを使用してください。",
+    "subproject_breadcrumb": "{{parent}} のサブプロジェクト"
   },
   "create_issue": {
     "sr_manual": "新規イシュー",
@@ -184,7 +185,8 @@
       "error_agent_unavailable_fallback": "エージェントを利用できません。別のエージェントを選択してください。",
       "error_daemon_version": "このエージェントのデーモン CLI（{{current}}）が必要なバージョン {{min}} を下回っています。エージェントで作成を使用するには、デーモンをアップグレードしてください。",
       "error_unknown": "送信できませんでした。再試行してください。",
-      "sub_issue_of": "{{identifier}} のサブイシュー"
+      "sub_issue_of": "{{identifier}} のサブイシュー",
+      "runtimes_group": "ランタイム"
     }
   }
 }

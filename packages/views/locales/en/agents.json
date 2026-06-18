@@ -81,7 +81,8 @@
     "fallback_runtime_local": "Local",
     "actions_aria": "Row actions",
     "task_count_one": "{{count}} task",
-    "task_count_other": "{{count}} tasks"
+    "task_count_other": "{{count}} tasks",
+    "runtime_blank": "Runtime"
   },
   "activity_tooltip": {
     "created_today": "Created today",
@@ -141,7 +142,8 @@
     "agent_archived_toast": "Agent archived",
     "archive_failed_toast": "Failed to archive agent",
     "agent_restored_toast": "Agent restored",
-    "restore_failed_toast": "Failed to restore agent"
+    "restore_failed_toast": "Failed to restore agent",
+    "runtime_blank_banner": "This is a runtime shortcut agent managed by Multica. Edit the runtime itself to change its name or visibility."
   },
   "inspector": {
     "section_properties": "Properties",
@@ -411,7 +413,9 @@
       "cancel_failed_toast": "Failed to cancel task",
       "started_prefix": "Started {{when}}",
       "dispatched_prefix": "Dispatched {{when}}",
-      "queued_prefix": "Queued {{when}}"
+      "queued_prefix": "Queued {{when}}",
+      "source_quick_create_agent": "AI-created agent",
+      "source_creating_agent": "Creating agent"
     }
   },
   "char_counter": {
@@ -499,5 +503,24 @@
     "selected_one": "{{count}} selected",
     "selected_other": "{{count}} selected",
     "clear_selection": "Clear selection"
+  },
+  "quick_create": {
+    "entry": "AI create",
+    "title": "AI create agent",
+    "description": "Describe the teammate you want. Multica will ask the selected runtime to create a configured agent for you.",
+    "prompt_label": "Agent brief",
+    "prompt_placeholder": "e.g. Create a frontend QA agent that reviews UI changes, checks accessibility, and files clear follow-up issues.",
+    "visibility_label": "Visibility",
+    "model_label": "Model",
+    "model_placeholder": "Runtime default",
+    "thinking_label": "Thinking",
+    "thinking_placeholder": "Runtime default",
+    "runtime_hint": "The selected runtime runs the generation task and will also be bound to the new agent.",
+    "cancel": "Cancel",
+    "submit": "Create with AI",
+    "toast_sent": "Agent creation started. You will get an inbox notification when it finishes.",
+    "toast_failed": "Failed to start agent creation",
+    "error_agent_unavailable_fallback": "The selected runtime is unavailable.",
+    "error_daemon_version": "This runtime needs Multica CLI {{min}} or newer for AI agent creation. Current version: {{current}}."
   }
 }

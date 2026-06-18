@@ -23,9 +23,10 @@ multica agent skills list <agent-id> --output json   # current skill bindings
 multica agent env get <agent-id> --output json  # plaintext env (owner/admin only, agents denied)
 ```
 
-`agent get` returns the persisted agent including `runtime_id`, `model`,
-`thinking_level`, `custom_args`, `has_custom_env`, `custom_env_key_count`, and
-`skills`. It never returns plaintext `custom_env`.
+`agent get` returns the persisted agent including `runtime_id`, `kind`,
+`model`, `thinking_level`, `custom_args`, `origin_type`, `origin_id`,
+`has_custom_env`, `custom_env_key_count`, and `skills`. It never returns
+plaintext `custom_env`.
 
 ## Core model
 
@@ -55,15 +56,22 @@ multica agent create --name <name> --runtime-id <runtime-id> \
   --output json
 ```
 
+For long or multi-line instructions, write the content to a UTF-8 file and use
+`--instructions-file <path>` (or pipe via `--instructions-stdin`). This avoids
+shell quoting issues and is the preferred path for generated agent
+instructions.
+
 `runAgentCreate` builds a JSON body and posts it to `/api/agents`. It only
-adds a key when its flag was provided — `description`/`instructions` on a
-non-empty value, the rest (`runtime-config`, `custom-args`, `model`,
-`thinking-level`, `visibility`, …) on the flag being `Changed` — so omitted
+adds a key when its flag was provided. `description` is added on a non-empty
+value; `instructions` can come from `--instructions`, `--instructions-file`, or
+`--instructions-stdin`; the rest (`runtime-config`, `custom-args`, `model`,
+`thinking-level`, `visibility`, …) are added on the flag being `Changed`. Omitted
 flags fall through to server defaults rather than sending empty strings.
 
 The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
 `instructions`, `runtime_id`, `runtime_config`, `custom_env`, `custom_args`,
-`model`, `thinking_level`, `visibility`, `max_concurrent_tasks`, `mcp_config`.
+`model`, `thinking_level`, `visibility`, `max_concurrent_tasks`, `mcp_config`,
+plus the task-scoped provenance fields `origin_type` and `origin_id`.
 
 ## Field contracts
 
@@ -81,6 +89,8 @@ The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
 | `mcp_config` | `agent.mcp_config` (raw JSON) | CLI checks it is a JSON object or `null`; server stores as-is. At create, literal `null` is dropped (no-op); at update, `null` clears the column | daemon → provider (MCP servers) — **runtime-consumed**; redacted on read |
 | `visibility` | `agent.visibility` | — | access control; defaults to `private`; gates who can read/route a private agent (e.g. a private squad leader) — NOT the runtime prompt |
 | `max_concurrent_tasks` | `agent.max_concurrent_tasks` | — | scheduler task cap; defaults to `6` |
+| `kind` | `agent.kind` | system-set | `configured` for normal user-authored agents; `runtime_blank` for runtime shortcut agents |
+| `origin_type` / `origin_id` | `agent.origin_type` / `agent.origin_id` | only `quick_create_agent`; task-scoped agent callers only | lets the server link AI-created agents back to the quick-create-agent task |
 
 Defaults when omitted: `runtime_config` → `{}`, `custom_env` → `{}`,
 `custom_args` → `[]`, `visibility` → `private`, `max_concurrent_tasks` → `6`
@@ -102,6 +112,58 @@ the valid levels — they are runtime/model-specific (Claude
 others), so it forwards whatever you pass and lets the server's provider
 catalog accept or reject it. A runtime whose provider has no thinking concept
 rejects any non-empty value with a 400.
+
+
+### Agent kinds and runtime blank agents
+
+`kind` has two values:
+
+- `configured` — normal agents created by `POST /api/agents` /
+  `multica agent create`; editable through the agent endpoints.
+- `runtime_blank` — a Multica-maintained shortcut agent for a runtime. Runtime
+  registration/update upserts exactly one blank agent per runtime. It uses the
+  runtime name, owner, runtime_id, runtime_mode, and visibility mapped to agent
+  visibility (`public` runtime → `workspace` agent, otherwise `private`).
+
+Runtime blank agents intentionally have empty `instructions`, `custom_env`,
+`custom_args`, `mcp_config`, `model`, and `thinking_level`. They can be selected
+where an agent can run work because the task queue still stores
+`agent_task_queue.agent_id` and `runtime_id`. Treat them as callable runtime
+shortcuts, not as editable configured agents. Generic agent update, env update,
+and skill-binding handlers reject writes against `kind=runtime_blank`; edit the
+runtime itself to change name/visibility.
+
+### AI-created agents
+
+The user-facing AI creation flow calls `POST /api/agents/quick-create` with:
+
+```json
+{
+  "prompt": "natural-language agent request",
+  "runtime_id": "<runtime-id>",
+  "visibility": "private",
+  "model": "optional model",
+  "thinking_level": "optional level"
+}
+```
+
+The endpoint validates runtime access, requires the runtime to be online, and
+requires a daemon CLI version that supports quick-create-agent task payloads
+(`MinQuickCreateAgentCLIVersion`). It then ensures the runtime blank agent
+exists and enqueues a `quick_create_agent` task against that blank agent. The
+daemon prompt asks the blank agent to run exactly one
+`multica agent create --output json` command for the selected runtime, using
+`--instructions-file` for the generated multi-line instructions. When the
+daemon injects `MULTICA_QUICK_CREATE_AGENT_TASK_ID`, the CLI automatically adds
+`origin_type=quick_create_agent` and `origin_id=<task-id>` to the create body.
+Those origin fields are accepted only from a task-scoped agent execution whose
+`origin_id` equals the current task ID and whose current task is a
+quick-create-agent task.
+
+Completion is discovered by `GetAgentByOrigin`. Success writes an
+`agent_create_done` inbox item; missing/failed creation writes
+`agent_create_failed`. Do not manually set `origin_type` / `origin_id` outside
+this flow.
 
 ### model vs custom_args
 
@@ -198,7 +260,9 @@ Read-only (safe): `agent get`, `agent skills list`, `agent env get`.
 
 State-changing (require an explicit instruction — do not run speculatively):
 
-- `multica agent create` — inserts a new agent row.
+- `multica agent create` — inserts a new configured agent row. In a
+  quick-create-agent task, the CLI also stamps `origin_type` / `origin_id` from
+  `MULTICA_QUICK_CREATE_AGENT_TASK_ID`.
 - `multica agent skills add` / `set` — mutate bindings (`set` is destructive:
   it drops bindings not in the new list).
 - `multica agent env set` — overwrites the full `custom_env` map and writes an
@@ -221,6 +285,11 @@ State-changing (require an explicit instruction — do not run speculatively):
   unknown provider-level literal is — model-specific gaps fail at run time.
 - "`set` and `add` are interchangeable for skills." `set` replaces all
   bindings; using it when you meant `add` silently removes capabilities.
+- "A runtime blank agent is a normal editable agent." It is callable, but
+  Multica owns its mutable fields; agent update/env/skill writes are rejected.
+- "AI-created-agent origin fields are general metadata." They are restricted
+  to task-scoped `quick_create_agent` execution and should not be sent by normal
+  callers.
 
 ## References
 

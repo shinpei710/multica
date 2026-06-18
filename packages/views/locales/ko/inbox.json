@@ -45,7 +45,9 @@
     "agent_completed": "에이전트 완료됨",
     "reaction_added": "반응 추가됨",
     "quick_create_done": "에이전트로 생성됨",
-    "quick_create_failed": "에이전트 생성 실패"
+    "quick_create_failed": "에이전트 생성 실패",
+    "agent_create_done": "에이전트 생성됨",
+    "agent_create_failed": "에이전트 생성 실패"
   },
   "labels": {
     "set_status_to": "상태 변경:",
@@ -58,7 +60,9 @@
     "removed_due_date": "마감일 제거됨",
     "reacted_to_comment": "내 댓글에 {{emoji}} 반응을 남겼습니다",
     "created_with_agent": "에이전트가 생성: {{identifier}}",
-    "failed_with_detail": "실패: {{detail}}"
+    "failed_with_detail": "실패: {{detail}}",
+    "created_agent_with_ai": "생성된 에이전트: {{name}}",
+    "agent_create_failed_detail": "에이전트 생성 실패: {{detail}}"
   },
   "errors": {
     "mark_read_failed": "읽음 표시를 하지 못했습니다",

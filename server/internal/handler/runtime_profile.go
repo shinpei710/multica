@@ -374,17 +374,16 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Guard 2: refuse (before any teardown) if any runtime still has an active
-	// squad whose leader is already archived on it — same rule the
-	// runtime-delete path enforces. Checked per runtime up front so we never
-	// half-tear-down and then 409.
+	// squad whose leader cannot remain after runtime teardown. Checked per
+	// runtime up front so we never half-tear-down and then 409.
 	for _, rid := range runtimeIDs {
-		activeSquadCount, err := h.Queries.CountActiveSquadsWithArchivedLeadersByRuntime(r.Context(), rid)
+		activeSquadCount, err := h.Queries.CountActiveSquadsWithNonConfiguredLeadersByRuntime(r.Context(), rid)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to check runtime squad dependencies")
 			return
 		}
 		if activeSquadCount > 0 {
-			writeError(w, http.StatusConflict, "cannot delete runtime profile: a runtime has active squads led by archived agents. Archive those squads or assign them a new leader first.")
+			writeError(w, http.StatusConflict, "cannot delete runtime profile: a runtime has active squads led by archived or runtime-managed agents. Archive those squads or assign them a new leader first.")
 			return
 		}
 	}

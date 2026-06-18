@@ -13,6 +13,8 @@ import type {
   ListGroupedIssuesParams,
   Agent,
   CreateAgentRequest,
+  QuickCreateAgentRequest,
+  QuickCreateAgentResponse,
   AgentTemplate,
   AgentTemplateSummary,
   CreateAgentFromTemplateRequest,
@@ -133,6 +135,8 @@ import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
+  AgentListSchema,
+  AgentSchema,
   AgentTemplateSchema,
   AgentTemplateSummaryListSchema,
   AttachmentResponseSchema,
@@ -147,6 +151,8 @@ import {
   DashboardRunTimeDailyListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
+  EMPTY_AGENT,
+  EMPTY_AGENT_LIST,
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_APP_CONFIG,
@@ -155,6 +161,10 @@ import {
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
+  EMPTY_LIST_PROJECTS_RESPONSE,
+  EMPTY_PROJECT,
+  EMPTY_QUICK_CREATE_AGENT_RESPONSE,
+  EMPTY_SEARCH_PROJECTS_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_SQUAD,
   EMPTY_SQUAD_LIST,
@@ -167,13 +177,17 @@ import {
   type AppConfigResponse,
   GroupedIssuesResponseSchema,
   ListAutopilotsResponseSchema,
+  ListProjectsResponseSchema,
   EMPTY_LIST_AUTOPILOTS_RESPONSE,
   ListIssuesResponseSchema,
   ListWebhookDeliveriesResponseSchema,
+  ProjectSchema,
+  QuickCreateAgentResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
+  SearchProjectsResponseSchema,
   SquadSchema,
   SquadListSchema,
   SquadMemberStatusListResponseSchema,
@@ -556,7 +570,13 @@ export class ApiClient {
     if (params.limit !== undefined) search.set("limit", String(params.limit));
     if (params.offset !== undefined) search.set("offset", String(params.offset));
     if (params.include_closed) search.set("include_closed", "true");
-    return this.fetch(`/api/projects/search?${search}`, params.signal ? { signal: params.signal } : undefined);
+    const raw = await this.fetch<unknown>(`/api/projects/search?${search}`, params.signal ? { signal: params.signal } : undefined);
+    return parseWithFallback(
+      raw,
+      SearchProjectsResponseSchema,
+      EMPTY_SEARCH_PROJECTS_RESPONSE,
+      { endpoint: "GET /api/projects/search" },
+    );
   }
 
   async getIssue(id: string): Promise<Issue> {
@@ -783,18 +803,40 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.include_archived) search.set("include_archived", "true");
-    return this.fetch(`/api/agents?${search}`);
+    const raw = await this.fetch<unknown>(`/api/agents?${search}`);
+    return parseWithFallback(raw, AgentListSchema, EMPTY_AGENT_LIST, {
+      endpoint: "GET /api/agents",
+    });
   }
 
   async getAgent(id: string): Promise<Agent> {
-    return this.fetch(`/api/agents/${id}`);
+    const raw = await this.fetch<unknown>(`/api/agents/${id}`);
+    return parseWithFallback(raw, AgentSchema, EMPTY_AGENT, {
+      endpoint: "GET /api/agents/:id",
+    });
   }
 
   async createAgent(data: CreateAgentRequest): Promise<Agent> {
-    return this.fetch("/api/agents", {
+    const raw = await this.fetch<unknown>("/api/agents", {
       method: "POST",
       body: JSON.stringify(data),
     });
+    return parseWithFallback(raw, AgentSchema, EMPTY_AGENT, {
+      endpoint: "POST /api/agents",
+    });
+  }
+
+  async quickCreateAgent(data: QuickCreateAgentRequest): Promise<QuickCreateAgentResponse> {
+    const raw = await this.fetch<unknown>("/api/agents/quick-create", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(
+      raw,
+      QuickCreateAgentResponseSchema,
+      EMPTY_QUICK_CREATE_AGENT_RESPONSE,
+      { endpoint: "POST /api/agents/quick-create" },
+    );
   }
 
   async listAgentTemplates(): Promise<AgentTemplateSummary[]> {
@@ -1830,29 +1872,75 @@ export class ApiClient {
   async listProjects(params?: { status?: string }): Promise<ListProjectsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
-    return this.fetch(`/api/projects?${search}`);
+    const query = search.toString();
+    const raw = await this.fetch<unknown>(`/api/projects${query ? `?${query}` : ""}`);
+    return parseWithFallback(
+      raw,
+      ListProjectsResponseSchema,
+      EMPTY_LIST_PROJECTS_RESPONSE,
+      { endpoint: "GET /api/projects" },
+    );
+  }
+
+  async listDeletedProjects(): Promise<ListProjectsResponse> {
+    const raw = await this.fetch<unknown>("/api/projects/trash");
+    return parseWithFallback(
+      raw,
+      ListProjectsResponseSchema,
+      EMPTY_LIST_PROJECTS_RESPONSE,
+      { endpoint: "GET /api/projects/trash" },
+    );
   }
 
   async getProject(id: string): Promise<Project> {
-    return this.fetch(`/api/projects/${id}`);
+    const raw = await this.fetch<unknown>(`/api/projects/${id}`);
+    return parseWithFallback(
+      raw,
+      ProjectSchema,
+      { ...EMPTY_PROJECT, id },
+      { endpoint: "GET /api/projects/:id" },
+    );
   }
 
   async createProject(data: CreateProjectRequest): Promise<Project> {
-    return this.fetch("/api/projects", {
+    const raw = await this.fetch<unknown>("/api/projects", {
       method: "POST",
       body: JSON.stringify(data),
     });
+    return parseWithFallback(
+      raw,
+      ProjectSchema,
+      EMPTY_PROJECT,
+      { endpoint: "POST /api/projects" },
+    );
   }
 
   async updateProject(id: string, data: UpdateProjectRequest): Promise<Project> {
-    return this.fetch(`/api/projects/${id}`, {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
+    return parseWithFallback(
+      raw,
+      ProjectSchema,
+      { ...EMPTY_PROJECT, id },
+      { endpoint: "PUT /api/projects/:id" },
+    );
   }
 
-  async deleteProject(id: string): Promise<void> {
-    await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
+  async deleteProject(id: string, confirm = false): Promise<void> {
+    const search = confirm ? "?confirm=true" : "";
+    await this.fetch(`/api/projects/${id}${search}`, { method: "DELETE" });
+  }
+
+  async restoreProject(id: string): Promise<ListProjectsResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/restore`, { method: "POST" });
+    return parseWithFallback(
+      raw,
+      ListProjectsResponseSchema,
+      EMPTY_LIST_PROJECTS_RESPONSE,
+      { endpoint: "POST /api/projects/:id/restore" },
+    );
   }
 
   // Project resources

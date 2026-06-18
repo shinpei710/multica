@@ -64,6 +64,8 @@ const TYPE_LABEL: Record<InboxItemType, string> = {
   reaction_added: "Reaction added",
   quick_create_done: "Quick-create done",
   quick_create_failed: "Quick-create failed",
+  agent_create_done: "AI-created agent",
+  agent_create_failed: "AI agent creation failed",
 };
 
 // due_date is a calendar day — format timezone-safely (no offset day shift).
@@ -144,6 +146,14 @@ export function InboxDetailLabel({
       case "quick_create_failed": {
         const detail = singleLine(details.error) || singleLine(item.body);
         return detail ? `Failed: ${detail}` : TYPE_LABEL[item.type];
+      }
+      case "agent_create_done": {
+        const name = singleLine(details.agent_name) || singleLine(item.title);
+        return name ? `Created agent with AI: ${name}` : TYPE_LABEL[item.type];
+      }
+      case "agent_create_failed": {
+        const detail = singleLine(details.error) || singleLine(item.body);
+        return detail ? `Agent create failed: ${detail}` : TYPE_LABEL[item.type];
       }
       default:
         return TYPE_LABEL[item.type] ?? item.type;

@@ -236,6 +236,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     );
   }
 
+  const isRuntimeBlank = (agent.kind ?? "configured") === "runtime_blank";
   const isArchived = !!agent.archived_at;
   const runtime = agent.runtime_id
     ? runtimes.find((r) => r.id === agent.runtime_id) ?? null
@@ -250,11 +251,18 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         agent={agent}
         presence={presence}
         backHref={paths.agents()}
-        canArchive={canEdit.allowed}
+        canArchive={canEdit.allowed && !isRuntimeBlank}
         onArchive={() => setConfirmArchive(true)}
       />
 
-      {!canEdit.allowed && (
+      {isRuntimeBlank ? (
+        <div className="px-6 pt-3">
+          <div className="flex items-center gap-2 rounded-md border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+            <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span>{t(($) => $.detail.runtime_blank_banner, { name: runtime?.name ?? agent.name })}</span>
+          </div>
+        </div>
+      ) : !canEdit.allowed ? (
         <div className="px-6 pt-3">
           <CapabilityBanner
             reason={canEdit.reason}
@@ -262,7 +270,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             ownerName={owner?.name}
           />
         </div>
-      )}
+      ) : null}
 
       {isArchived && (
         <div className="flex shrink-0 items-center gap-2 border-b bg-muted/50 px-6 py-2 text-xs text-muted-foreground">
@@ -292,7 +300,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           runtimes={runtimes}
           members={members}
           currentUserId={currentUser?.id ?? null}
-          canEdit={canEdit.allowed}
+          canEdit={canEdit.allowed && !isRuntimeBlank}
           onUpdate={handleUpdate}
           onShowIntegrations={() => setTabNavIntent("integrations")}
         />

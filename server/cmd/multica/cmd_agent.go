@@ -158,7 +158,9 @@ func init() {
 	// agent create
 	agentCreateCmd.Flags().String("name", "", "Agent name (required)")
 	agentCreateCmd.Flags().String("description", "", "Agent description")
-	agentCreateCmd.Flags().String("instructions", "", "Agent instructions")
+	agentCreateCmd.Flags().String("instructions", "", "Agent instructions. For multi-line content, prefer --instructions-stdin or --instructions-file to avoid shell quoting issues.")
+	agentCreateCmd.Flags().Bool("instructions-stdin", false, "Read agent instructions from stdin. Mutually exclusive with --instructions and --instructions-file.")
+	agentCreateCmd.Flags().String("instructions-file", "", "Read agent instructions from a UTF-8 file. Mutually exclusive with --instructions and --instructions-stdin.")
 	agentCreateCmd.Flags().String("runtime-id", "", "Runtime ID (required)")
 	agentCreateCmd.Flags().String("runtime-config", "", "Runtime config as JSON string")
 	agentCreateCmd.Flags().String("model", "", "Model identifier (e.g. claude-sonnet-4-6, openai/gpt-4o). Prefer this over passing --model in --custom-args.")
@@ -177,7 +179,9 @@ func init() {
 	// agent update
 	agentUpdateCmd.Flags().String("name", "", "New name")
 	agentUpdateCmd.Flags().String("description", "", "New description")
-	agentUpdateCmd.Flags().String("instructions", "", "New instructions")
+	agentUpdateCmd.Flags().String("instructions", "", "New instructions. For multi-line content, prefer --instructions-stdin or --instructions-file to avoid shell quoting issues.")
+	agentUpdateCmd.Flags().Bool("instructions-stdin", false, "Read new instructions from stdin. Mutually exclusive with --instructions and --instructions-file.")
+	agentUpdateCmd.Flags().String("instructions-file", "", "Read new instructions from a UTF-8 file. Mutually exclusive with --instructions and --instructions-stdin.")
 	agentUpdateCmd.Flags().String("runtime-id", "", "New runtime ID")
 	agentUpdateCmd.Flags().String("runtime-config", "", "New runtime config as JSON string")
 	agentUpdateCmd.Flags().String("model", "", "New model identifier. Pass an empty string to clear and fall back to the runtime default.")
@@ -438,8 +442,10 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("description"); v != "" {
 		body["description"] = v
 	}
-	if v, _ := cmd.Flags().GetString("instructions"); v != "" {
-		body["instructions"] = v
+	if instructions, ok, err := resolveInstructions(cmd); err != nil {
+		return err
+	} else if ok {
+		body["instructions"] = instructions
 	}
 	if cmd.Flags().Changed("runtime-config") {
 		v, _ := cmd.Flags().GetString("runtime-config")
@@ -487,6 +493,10 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 		v, _ := cmd.Flags().GetInt32("max-concurrent-tasks")
 		body["max_concurrent_tasks"] = v
 	}
+	if taskID := os.Getenv("MULTICA_QUICK_CREATE_AGENT_TASK_ID"); taskID != "" {
+		body["origin_type"] = "quick_create_agent"
+		body["origin_id"] = taskID
+	}
 
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
@@ -520,9 +530,10 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("description")
 		body["description"] = v
 	}
-	if cmd.Flags().Changed("instructions") {
-		v, _ := cmd.Flags().GetString("instructions")
-		body["instructions"] = v
+	if instructions, ok, err := resolveInstructions(cmd); err != nil {
+		return err
+	} else if ok {
+		body["instructions"] = instructions
 	}
 	if cmd.Flags().Changed("runtime-id") {
 		v, _ := cmd.Flags().GetString("runtime-id")
@@ -574,7 +585,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --thinking-level, --custom-args, --mcp-config, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --instructions-stdin, --instructions-file, --runtime-id, --runtime-config, --model, --thinking-level, --custom-args, --mcp-config, --visibility, --status, or --max-concurrent-tasks (env vars now live behind `multica agent env set <id>`)")
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())
@@ -986,6 +997,63 @@ func parseCustomEnv(raw string) (map[string]string, error) {
 		ce = map[string]string{}
 	}
 	return ce, nil
+}
+
+// resolveInstructions collects --instructions, --instructions-stdin, and
+// --instructions-file. It intentionally allows empty inline --instructions
+// only when the flag is explicitly changed, which lets agent update clear the
+// field while keeping create's default absent. Stdin/file inputs reject empty
+// content because that almost always means a broken pipe or missing file.
+func resolveInstructions(cmd *cobra.Command) (string, bool, error) {
+	inline := cmd.Flags().Changed("instructions")
+	fromStdin, _ := cmd.Flags().GetBool("instructions-stdin")
+	filePath, _ := cmd.Flags().GetString("instructions-file")
+	fromFile := cmd.Flags().Changed("instructions-file")
+
+	count := 0
+	if inline {
+		count++
+	}
+	if fromStdin {
+		count++
+	}
+	if fromFile {
+		count++
+	}
+	switch {
+	case count == 0:
+		return "", false, nil
+	case count > 1:
+		return "", false, fmt.Errorf("--instructions, --instructions-stdin, and --instructions-file are mutually exclusive; pick one")
+	}
+
+	switch {
+	case inline:
+		v, _ := cmd.Flags().GetString("instructions")
+		return v, true, nil
+	case fromStdin:
+		buf, err := io.ReadAll(cmd.InOrStdin())
+		if err != nil {
+			return "", false, fmt.Errorf("read --instructions-stdin: %w", err)
+		}
+		if strings.TrimSpace(string(buf)) == "" {
+			return "", false, fmt.Errorf("--instructions-stdin: empty input")
+		}
+		return string(buf), true, nil
+	case fromFile:
+		if filePath == "" {
+			return "", false, fmt.Errorf("--instructions-file: path must not be empty")
+		}
+		buf, err := os.ReadFile(filePath)
+		if err != nil {
+			return "", false, fmt.Errorf("read --instructions-file: %w", err)
+		}
+		if strings.TrimSpace(string(buf)) == "" {
+			return "", false, fmt.Errorf("--instructions-file %q: empty contents", filePath)
+		}
+		return string(buf), true, nil
+	}
+	return "", false, nil
 }
 
 // parseCustomArgs parses the --custom-args flag value (a JSON array of

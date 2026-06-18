@@ -483,6 +483,9 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	if ctx.QuickCreatePrompt != "" {
 		return renderQuickCreateContext(ctx)
 	}
+	if ctx.QuickCreateAgentPrompt != "" {
+		return renderQuickCreateAgentContext(ctx)
+	}
 
 	var b strings.Builder
 
@@ -530,6 +533,26 @@ func renderQuickCreateContext(ctx TaskContextForEnv) string {
 		}
 		b.WriteString("\n")
 	}
+	return b.String()
+}
+
+func renderQuickCreateAgentContext(ctx TaskContextForEnv) string {
+	var b strings.Builder
+	b.WriteString("# AI Create Agent\n\n")
+	b.WriteString("**Trigger:** AI create agent modal\n\n")
+	b.WriteString("## User input\n\n")
+	b.WriteString("> ")
+	b.WriteString(ctx.QuickCreateAgentPrompt)
+	b.WriteString("\n\n")
+	if len(ctx.AgentSkills) > 0 {
+		b.WriteString("## Agent Skills\n\n")
+		for _, skill := range ctx.AgentSkills {
+			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("## Output\n\n")
+	b.WriteString("Create one configured agent with `multica agent create`. There is no existing issue to comment on.\n")
 	return b.String()
 }
 

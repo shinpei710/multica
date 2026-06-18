@@ -21,6 +21,7 @@ import { api } from "@multica/core/api";
 import { useAgentPresenceDetail, useWorkspaceAgentAvailability } from "@multica/core/agents";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { isRuntimeBlankAgent } from "../../common/agent-kind";
 import {
   PickerEmpty,
   PickerItem,
@@ -832,16 +833,21 @@ export function AgentDropdown({
   const { t } = useT("chat");
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
-  // Split into the user's own agents and everyone else so the menu groups
-  // them — matches the old AgentSelector layout.
-  const { mine, others } = useMemo(() => {
+  // Split configured agents by owner and runtime blank agents into their own
+  // group so runtime shortcuts are clearly distinct from editable agents.
+  const { mine, others, runtimes } = useMemo(() => {
     const mine: Agent[] = [];
     const others: Agent[] = [];
+    const runtimes: Agent[] = [];
     for (const a of agents) {
+      if (isRuntimeBlankAgent(a)) {
+        runtimes.push(a);
+        continue;
+      }
       if (a.owner_id === userId) mine.push(a);
       else others.push(a);
     }
-    return { mine, others };
+    return { mine, others, runtimes };
   }, [agents, userId]);
 
   const query = filter.trim().toLowerCase();
@@ -849,6 +855,7 @@ export function AgentDropdown({
     !query || name.toLowerCase().includes(query) || matchesPinyin(name, query);
   const filteredMine = mine.filter((agent) => matches(agent.name));
   const filteredOthers = others.filter((agent) => matches(agent.name));
+  const filteredRuntimes = runtimes.filter((agent) => matches(agent.name));
 
   const handlePick = (agent: Agent) => {
     onSelect(agent);
@@ -889,10 +896,24 @@ export function AgentDropdown({
         </>
       }
     >
-      {filteredMine.length === 0 && filteredOthers.length === 0 ? (
+      {filteredMine.length === 0 &&
+      filteredOthers.length === 0 &&
+      filteredRuntimes.length === 0 ? (
         <PickerEmpty />
       ) : (
         <>
+          {filteredRuntimes.length > 0 && (
+            <PickerSection label={t(($) => $.window.runtimes)}>
+              {filteredRuntimes.map((agent) => (
+                <AgentPickerItem
+                  key={agent.id}
+                  agent={agent}
+                  isCurrent={agent.id === activeAgent.id}
+                  onSelect={handlePick}
+                />
+              ))}
+            </PickerSection>
+          )}
           {filteredMine.length > 0 && (
             <PickerSection label={t(($) => $.window.my_agents)}>
               {filteredMine.map((agent) => (

@@ -46,6 +46,12 @@ const agents = [
   makeAgent({ id: "mine-zhang", name: "张三", owner_id: "user-1" }),
   makeAgent({ id: "other-beta", name: "Beta", owner_id: "user-2" }),
   makeAgent({ id: "other-gamma", name: "Gamma", owner_id: "user-2" }),
+  makeAgent({
+    id: "runtime-hermes",
+    name: "Hermes",
+    owner_id: "user-2",
+    kind: "runtime_blank",
+  }),
 ];
 
 function renderDropdown(onSelect = vi.fn()) {
@@ -82,6 +88,7 @@ describe("AgentDropdown", () => {
     expect(within(dialog).queryByText("张三")).not.toBeInTheDocument();
     expect(within(dialog).getByText("Beta")).toBeInTheDocument();
     expect(within(dialog).queryByText("Gamma")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("Hermes")).not.toBeInTheDocument();
     expect(within(dialog).getByText("Others")).toBeInTheDocument();
   });
 
@@ -96,6 +103,16 @@ describe("AgentDropdown", () => {
     expect(within(dialog).getByText("My agents")).toBeInTheDocument();
     expect(within(dialog).queryByText("Alpha")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("Beta")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("Hermes")).not.toBeInTheDocument();
+  });
+
+  it("groups runtime blank agents separately", async () => {
+    renderDropdown();
+
+    const dialog = await screen.findByRole("dialog");
+
+    expect(within(dialog).getByText("Runtimes")).toBeInTheDocument();
+    expect(within(dialog).getByText("Hermes")).toBeInTheDocument();
   });
 
   it("shows the shared empty state when no agents match", async () => {
@@ -107,6 +124,7 @@ describe("AgentDropdown", () => {
     expect(screen.getByText("No results")).toBeInTheDocument();
     expect(screen.queryByText("My agents")).not.toBeInTheDocument();
     expect(screen.queryByText("Others")).not.toBeInTheDocument();
+    expect(screen.queryByText("Runtimes")).not.toBeInTheDocument();
   });
 
   it("left-aligns agent picker rows", async () => {

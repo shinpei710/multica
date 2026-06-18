@@ -474,4 +474,25 @@ describe("CreateSquadModal", () => {
     const button = getSubmitButton();
     expect(button.disabled).toBe(false);
   });
+
+  it("does not offer runtime blank agents as squad leaders", () => {
+    mocks.agents = [
+      makeAgent({
+        id: "agent-configured",
+        name: "ConfiguredAgent",
+        owner_id: ME,
+      }),
+      makeAgent({
+        id: "agent-runtime-blank",
+        name: "RuntimeShortcut",
+        owner_id: ME,
+        kind: "runtime_blank",
+      }),
+    ];
+
+    renderModal();
+
+    expect(screen.getAllByText("ConfiguredAgent").length).toBeGreaterThan(0);
+    expect(screen.queryByText("RuntimeShortcut")).not.toBeInTheDocument();
+  });
 });

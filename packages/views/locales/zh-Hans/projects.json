@@ -17,7 +17,8 @@
     "no_matches": "没有匹配的项目",
     "selected_one": "已选 {{count}} 项",
     "selected_other": "已选 {{count}} 项",
-    "clear_selection": "清除选择"
+    "clear_selection": "清除选择",
+    "trash": "回收站"
   },
   "table": {
     "name": "名称",
@@ -75,7 +76,9 @@
     "no_issues_yet": "目前还没有 issue",
     "toast_link_copied": "已复制链接",
     "toast_project_deleted": "已删除项目",
-    "toast_move_issue_failed": "移动 issue 失败"
+    "toast_move_issue_failed": "移动 issue 失败",
+    "section_subprojects": "子项目",
+    "no_subprojects": "还没有子项目"
   },
   "resources": {
     "section_header": "资源",
@@ -116,9 +119,12 @@
   },
   "delete_dialog": {
     "title": "删除项目",
-    "description": "将删除这个项目。issue 不会被删除，只会从项目中解除关联。",
+    "description": "会将项目移入回收站。issue 会保持关联，项目恢复后会回到原项目。",
     "confirm": "删除",
-    "cancel": "取消"
+    "cancel": "取消",
+    "non_empty_description": "这个项目包含 {{child_count}} 个子项目和 {{issue_count}} 个关联 issue。要删除整棵项目树吗？",
+    "confirm_tree": "删除项目树",
+    "restore_hint": "项目 30 天内可恢复，issue 不会被删除。"
   },
   "picker": {
     "no_project": "无项目",
@@ -143,5 +149,16 @@
     "direction_desc": "降序",
     "section_columns": "列",
     "view": "视图"
+  },
+  "trash": {
+    "open": "回收站",
+    "title": "项目回收站",
+    "description": "删除后的项目 30 天内可以恢复。恢复后 issue 会回到原项目。",
+    "empty": "回收站为空",
+    "restore": "恢复",
+    "days_remaining_other": "还剩 {{count}} 天可恢复",
+    "expires_unknown": "恢复期限未知",
+    "toast_restored": "项目已恢复",
+    "toast_restore_failed": "恢复项目失败"
   }
 }

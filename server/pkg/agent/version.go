@@ -16,15 +16,20 @@ var MinVersions = map[string]string{
 	"copilot": "1.0.0",   // --output-format json envelope stable from 1.0.x
 }
 
-// MinQuickCreateCLIVersion gates the agent-create (quick-create) flow against
-// the multica CLI version reported by the daemon at registration time. The
-// quick-create prompt that the agent runs depends on CLI behavior introduced
-// after this version (attachment URL handling, quick-create attachment
-// binding, no-retry semantics on `multica issue create` failure — see PR
-// #1851); older daemons would either double-create issues or mishandle pasted
-// screenshot URLs. Treated as a hard requirement: missing / unparsable / below
-// this threshold all fail closed.
+// MinQuickCreateCLIVersion gates the issue quick-create flow against the
+// multica CLI version reported by the daemon at registration time. The prompt
+// that the agent runs depends on CLI behavior introduced after this version
+// (attachment URL handling, quick-create attachment binding, no-retry semantics
+// on `multica issue create` failure; see PR #1851); older daemons would either
+// double-create issues or mishandle pasted screenshot URLs. Treated as a hard
+// requirement: missing / unparsable / below this threshold all fail closed.
 const MinQuickCreateCLIVersion = "0.2.21"
+
+// MinQuickCreateAgentCLIVersion gates the AI agent creation flow. It needs a
+// daemon/CLI build that understands quick_create_agent task payloads, injects
+// MULTICA_QUICK_CREATE_AGENT_TASK_ID, and exposes `multica agent create
+// --instructions-file` for safe multi-line generated instructions.
+const MinQuickCreateAgentCLIVersion = "0.2.22"
 
 // Errors returned by CheckMinCLIVersion. Callers branch on these to surface
 // "needs upgrade" vs "version not reported" with the right user message.
@@ -50,6 +55,14 @@ var devDescribeRe = regexp.MustCompile(`^v?\d+\.\d+\.\d+-\d+-g[0-9a-fA-F]+`)
 // itself is the shared signal, so the modal pre-check and this server gate
 // agree by construction without needing to compare separate env flags.
 func CheckMinCLIVersion(detected string) error {
+	return checkMinCLIVersion(detected, MinQuickCreateCLIVersion)
+}
+
+func CheckMinQuickCreateAgentCLIVersion(detected string) error {
+	return checkMinCLIVersion(detected, MinQuickCreateAgentCLIVersion)
+}
+
+func checkMinCLIVersion(detected, minVersion string) error {
 	d := strings.TrimSpace(detected)
 	if d == "" {
 		return ErrCLIVersionMissing
@@ -61,7 +74,7 @@ func CheckMinCLIVersion(detected string) error {
 	if err != nil {
 		return ErrCLIVersionMissing
 	}
-	min, err := parseSemver(MinQuickCreateCLIVersion)
+	min, err := parseSemver(minVersion)
 	if err != nil {
 		// Misconfiguration in the constant itself — fail closed as missing.
 		return ErrCLIVersionMissing

@@ -303,3 +303,62 @@ func createCascadeFixtureAgent(t *testing.T, ctx context.Context, runtimeID, nam
 	})
 	return agentID
 }
+
+// TestDeleteAgentRuntime_IgnoresRuntimeBlankAgent verifies the system-owned
+// runtime_blank companion does not make an otherwise empty runtime look like
+// it has user-managed active agents. The delete path must remove the blank
+// agent before deleting the runtime so the RESTRICT FK is satisfied.
+func TestDeleteAgentRuntime_IgnoresRuntimeBlankAgent(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	runtimeID := createCascadeFixtureRuntime(t, ctx, "Runtime Blank Delete Runtime")
+	runtimeUUID, err := uuidFromString(runtimeID)
+	if err != nil {
+		t.Fatalf("parse runtime id: %v", err)
+	}
+	rt, err := testHandler.Queries.GetAgentRuntime(ctx, runtimeUUID)
+	if err != nil {
+		t.Fatalf("load runtime: %v", err)
+	}
+	blank, err := testHandler.ensureRuntimeBlankAgent(ctx, rt, "system", "")
+	if err != nil {
+		t.Fatalf("ensure runtime blank agent: %v", err)
+	}
+	if blank.Kind != "runtime_blank" {
+		t.Fatalf("expected runtime_blank agent, got %q", blank.Kind)
+	}
+
+	activeAgents, err := testHandler.Queries.ListActiveAgentsByRuntime(ctx, rt.ID)
+	if err != nil {
+		t.Fatalf("list active agents: %v", err)
+	}
+	if len(activeAgents) != 0 {
+		t.Fatalf("runtime blank agent should not be listed as active configured agent: %+v", activeAgents)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/runtimes/"+runtimeID, nil)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.DeleteAgentRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DeleteAgentRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var runtimeRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&runtimeRows); err != nil {
+		t.Fatalf("count runtime rows: %v", err)
+	}
+	if runtimeRows != 0 {
+		t.Fatalf("expected runtime to be deleted, found %d", runtimeRows)
+	}
+	var blankRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent WHERE id = $1`, blank.ID).Scan(&blankRows); err != nil {
+		t.Fatalf("count blank agent rows: %v", err)
+	}
+	if blankRows != 0 {
+		t.Fatalf("expected runtime blank agent to be deleted with runtime, found %d", blankRows)
+	}
+}

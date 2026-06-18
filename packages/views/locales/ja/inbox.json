@@ -45,7 +45,9 @@
     "agent_completed": "エージェントが完了",
     "reaction_added": "リアクションあり",
     "quick_create_done": "エージェントで作成",
-    "quick_create_failed": "エージェントでの作成に失敗"
+    "quick_create_failed": "エージェントでの作成に失敗",
+    "agent_create_done": "エージェント作成済み",
+    "agent_create_failed": "エージェント作成失敗"
   },
   "labels": {
     "set_status_to": "ステータスを変更:",
@@ -58,7 +60,9 @@
     "removed_due_date": "期限を削除",
     "reacted_to_comment": "あなたのコメントに {{emoji}} のリアクションをしました",
     "created_with_agent": "エージェントで作成: {{identifier}}",
-    "failed_with_detail": "失敗: {{detail}}"
+    "failed_with_detail": "失敗: {{detail}}",
+    "created_agent_with_ai": "作成されたエージェント: {{name}}",
+    "agent_create_failed_detail": "エージェント作成失敗: {{detail}}"
   },
   "errors": {
     "mark_read_failed": "既読にできませんでした",
