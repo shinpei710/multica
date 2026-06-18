@@ -85,8 +85,20 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 			sweepStaleTasks(ctx, queries, taskSvc, bus)
 			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
+			sweepExpiredDeletedProjects(ctx, queries)
 			gcRuntimes(ctx, queries, bus)
 		}
+	}
+}
+
+func sweepExpiredDeletedProjects(ctx context.Context, queries *db.Queries) {
+	deleted, err := queries.DeleteExpiredProjects(ctx)
+	if err != nil {
+		slog.Warn("project trash sweeper: failed to delete expired projects", "error", err)
+		return
+	}
+	if deleted > 0 {
+		slog.Info("project trash sweeper: hard-deleted expired projects", "count", deleted)
 	}
 }
 

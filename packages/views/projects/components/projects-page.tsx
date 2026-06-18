@@ -15,14 +15,17 @@ import {
   Rows3,
   Search,
   Trash2,
+  Undo2,
   X,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   projectListOptions,
+  projectTrashOptions,
   useUpdateProject,
   useDeleteProject,
+  useRestoreProject,
   useProjectViewStore,
   type ProjectColumnKey,
   type ProjectListFilters,
@@ -101,6 +104,12 @@ import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useFormatRelativeDate } from "./labels";
 import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
 import { ProjectLeadPicker } from "./project-lead-picker";
+import { ProjectDeleteDialog } from "./project-delete-dialog";
+import {
+  addProjectAncestors,
+  flattenProjectTree,
+  type ProjectTreeRow,
+} from "./project-tree";
 
 // Sort order maps for the enum columns (header sort needs a total order).
 const PRIORITY_ORDER: Record<ProjectPriority, number> = {
@@ -223,7 +232,6 @@ function ProjectRowActions({
   const { t } = useT("projects");
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
-  const deleteProject = useDeleteProject();
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const togglePin = () => {
@@ -269,42 +277,11 @@ function ProjectRowActions({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t(($) => $.delete_dialog.title)}</DialogTitle>
-            <DialogDescription>
-              {t(($) => $.delete_dialog.description)}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setDeleteOpen(false)}
-            >
-              {t(($) => $.delete_dialog.cancel)}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              onClick={() => {
-                deleteProject.mutate(project.id, {
-                  onError: (err) =>
-                    toast.error(
-                      err instanceof Error ? err.message : String(err),
-                    ),
-                });
-                setDeleteOpen(false);
-              }}
-            >
-              {t(($) => $.delete_dialog.confirm)}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ProjectDeleteDialog
+        project={project}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+      />
     </>
   );
 }
@@ -338,6 +315,7 @@ function CheckboxCell({
 
 function ProjectTableRow({
   project,
+  depth,
   pinned,
   canDelete,
   isColVisible,
@@ -347,6 +325,7 @@ function ProjectTableRow({
   rowLink,
 }: {
   project: Project;
+  depth: number;
   pinned: boolean;
   canDelete: boolean;
   isColVisible: (key: ProjectColumnKey) => boolean;
@@ -369,9 +348,19 @@ function ProjectTableRow({
     >
       <CheckboxCell checked={selected} onToggle={onToggleSelect} />
       <ListGridCell className="gap-2">
-        <ProjectIcon project={project} size="sm" />
-        <span className="min-w-0 truncate text-sm font-medium">
-          {project.title}
+        <span
+          className="flex min-w-0 items-center gap-2"
+          style={{ paddingLeft: depth > 0 ? Math.min(depth, 8) * 18 : 0 }}
+        >
+          <ProjectIcon project={project} size="sm" />
+          <span className="min-w-0 truncate text-sm font-medium">
+            {project.title}
+          </span>
+          {project.child_count > 0 && (
+            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              {project.child_count}
+            </span>
+          )}
         </span>
       </ListGridCell>
 
@@ -552,10 +541,12 @@ function ProjectTableHeader({
 
 function ProjectCard({
   project,
+  depth,
   pinned,
   canDelete,
 }: {
   project: Project;
+  depth: number;
   pinned: boolean;
   canDelete: boolean;
 }) {
@@ -579,9 +570,15 @@ function ProjectCard({
           <AppLink
             href={wsPaths.projectDetail(project.id)}
             className="flex min-w-0 flex-1 items-center gap-2"
+            style={{ paddingLeft: depth > 0 ? Math.min(depth, 8) * 14 : 0 }}
           >
             <ProjectIcon project={project} size="sm" />
             <h3 className="truncate text-sm font-medium">{project.title}</h3>
+            {project.child_count > 0 && (
+              <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                {project.child_count}
+              </span>
+            )}
           </AppLink>
           <ProjectRowActions project={project} pinned={pinned} canDelete={canDelete} />
           <ProjectStatusBadge project={project} handleUpdate={handleUpdate} triggerClassName="shrink-0" />
@@ -750,7 +747,7 @@ function ProjectBatchToolbar({
               variant="destructive"
               size="sm"
               onClick={() => {
-                for (const p of rows) deleteProject.mutate(p.id);
+                for (const p of rows) deleteProject.mutate({ id: p.id, confirm: true });
                 setConfirmDelete(false);
                 onClear();
               }}
@@ -762,6 +759,98 @@ function ProjectBatchToolbar({
       </Dialog>
     </>
   );
+}
+
+
+function ProjectTrashDialog() {
+  const { t } = useT("projects");
+  const wsId = useWorkspaceId();
+  const [open, setOpen] = useState(false);
+  const { data: deletedProjects = [], isLoading } = useQuery({
+    ...projectTrashOptions(wsId),
+    enabled: open,
+  });
+  const restoreProject = useRestoreProject();
+
+  const restore = async (project: Project) => {
+    try {
+      await restoreProject.mutateAsync(project.id);
+      toast.success(t(($) => $.trash.toast_restored));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(($) => $.trash.toast_restore_failed));
+    }
+  };
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-8 w-8 gap-1 px-0 text-muted-foreground md:w-auto md:px-2.5"
+        aria-label={t(($) => $.trash.open)}
+        onClick={() => setOpen(true)}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+        <span className="hidden md:inline">{t(($) => $.trash.open)}</span>
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{t(($) => $.trash.title)}</DialogTitle>
+            <DialogDescription>{t(($) => $.trash.description)}</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-96 overflow-y-auto rounded-md border">
+            {isLoading ? (
+              <div className="space-y-2 p-3">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <Skeleton key={i} className="h-12 w-full" />
+                ))}
+              </div>
+            ) : deletedProjects.length === 0 ? (
+              <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center text-muted-foreground">
+                <Trash2 className="h-8 w-8 opacity-40" />
+                <p className="text-sm">{t(($) => $.trash.empty)}</p>
+              </div>
+            ) : (
+              <div className="divide-y">
+                {deletedProjects.map((project) => (
+                  <div key={project.id} className="flex items-center gap-3 px-3 py-2.5">
+                    <ProjectIcon project={project} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">{project.title}</div>
+                      <div className="mt-0.5 text-xs text-muted-foreground">
+                        {project.delete_expires_at
+                          ? t(($) => $.trash.days_remaining, {
+                              count: daysRemaining(project.delete_expires_at),
+                            })
+                          : t(($) => $.trash.expires_unknown)}
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={restoreProject.isPending}
+                      onClick={() => void restore(project)}
+                    >
+                      <Undo2 className="mr-1 h-3.5 w-3.5" />
+                      {t(($) => $.trash.restore)}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function daysRemaining(value: string): number {
+  const ms = Date.parse(value) - Date.now();
+  if (!Number.isFinite(ms) || ms <= 0) return 0;
+  return Math.ceil(ms / (24 * 60 * 60 * 1000));
 }
 
 // ---------------------------------------------------------------------------
@@ -838,46 +927,60 @@ export function ProjectsPage() {
     return m;
   }, [projects]);
 
-  const visible = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const filtered = projects.filter((p) => {
-      if (q && !p.title.toLowerCase().includes(q) && !matchesPinyin(p.title, q)) {
-        return false;
-      }
-      if (filters.statuses.length && !filters.statuses.includes(p.status)) return false;
-      if (filters.priorities.length && !filters.priorities.includes(p.priority)) {
-        return false;
-      }
-      if (filters.leads.length) {
-        const v = leadFilterValue(p);
-        if (!v || !filters.leads.includes(v)) return false;
-      }
-      return true;
-    });
+  const compareProjects = useCallback((a: Project, b: Project) => {
     const dir = sortDirection === "asc" ? 1 : -1;
-    const sorted = [...filtered];
-    sorted.sort((a, b) => {
-      if (sortField === "name") return a.title.localeCompare(b.title) * dir;
-      if (sortField === "priority") {
-        return (
-          (PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]) * dir ||
-          a.title.localeCompare(b.title)
-        );
-      }
-      if (sortField === "status") {
-        return (
-          (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) * dir ||
-          a.title.localeCompare(b.title)
-        );
-      }
-      if (sortField === "progress") {
-        return (progressOf(a) - progressOf(b)) * dir || a.title.localeCompare(b.title);
-      }
-      return (Date.parse(a.created_at) - Date.parse(b.created_at)) * dir;
-    });
-    return sorted;
-  }, [projects, search, filters, sortField, sortDirection]);
+    if (sortField === "name") return a.title.localeCompare(b.title) * dir;
+    if (sortField === "priority") {
+      return (
+        (PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]) * dir ||
+        a.title.localeCompare(b.title)
+      );
+    }
+    if (sortField === "status") {
+      return (
+        (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) * dir ||
+        a.title.localeCompare(b.title)
+      );
+    }
+    if (sortField === "progress") {
+      return (progressOf(a) - progressOf(b)) * dir || a.title.localeCompare(b.title);
+    }
+    return (Date.parse(a.created_at) - Date.parse(b.created_at)) * dir;
+  }, [sortField, sortDirection]);
 
+  const filteredProjectIds = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return new Set(
+      projects
+        .filter((p) => {
+          if (q && !p.title.toLowerCase().includes(q) && !matchesPinyin(p.title, q)) {
+            return false;
+          }
+          if (filters.statuses.length && !filters.statuses.includes(p.status)) return false;
+          if (filters.priorities.length && !filters.priorities.includes(p.priority)) {
+            return false;
+          }
+          if (filters.leads.length) {
+            const v = leadFilterValue(p);
+            if (!v || !filters.leads.includes(v)) return false;
+          }
+          return true;
+        })
+        .map((p) => p.id),
+    );
+  }, [projects, search, filters]);
+
+  const visibleRows = useMemo<ProjectTreeRow[]>(() => {
+    if (filteredProjectIds.size === 0) return [];
+    return flattenProjectTree(
+      projects,
+      compareProjects,
+      addProjectAncestors(projects, filteredProjectIds),
+    );
+  }, [projects, filteredProjectIds, compareProjects]);
+
+  const visible = useMemo(() => visibleRows.map((row) => row.project), [visibleRows]);
+  const filteredCount = filteredProjectIds.size;
   const selectedProjects = visible.filter((p) => selectedIds.has(p.id));
   const allSelected = visible.length > 0 && selectedProjects.length === visible.length;
   const someSelected = selectedProjects.length > 0 && !allSelected;
@@ -923,16 +1026,19 @@ export function ProjectsPage() {
             </span>
           )}
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-          aria-label={t(($) => $.page.new_project)}
-          onClick={openCreateProject}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          <span className="hidden md:inline">{t(($) => $.page.new_project)}</span>
-        </Button>
+        <div className="flex items-center gap-1">
+          <ProjectTrashDialog />
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+            aria-label={t(($) => $.page.new_project)}
+            onClick={openCreateProject}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span className="hidden md:inline">{t(($) => $.page.new_project)}</span>
+          </Button>
+        </div>
       </PageHeader>
 
       {showEmpty ? (
@@ -962,7 +1068,7 @@ export function ProjectsPage() {
                   title={t(($) => $.toolbar.result_count_title)}
                   className="hidden shrink-0 text-xs tabular-nums text-muted-foreground md:inline"
                 >
-                  {visible.length} / {projects.length}
+                  {filteredCount} / {projects.length}
                 </span>
               )}
             </div>
@@ -1207,10 +1313,11 @@ export function ProjectsPage() {
                   someSelected={someSelected}
                   onToggleAll={handleToggleAll}
                 />
-                {visible.map((project) => (
+                {visibleRows.map(({ project, depth }) => (
                   <ProjectTableRow
                     key={project.id}
                     project={project}
+                    depth={depth}
                     pinned={pinnedProjectIds.has(project.id)}
                     canDelete={isWorkspaceAdmin}
                     isColVisible={isColVisible}
@@ -1228,10 +1335,11 @@ export function ProjectsPage() {
                 className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
                 style={{ paddingBottom: LIST_GRID_BOTTOM_CLEARANCE }}
               >
-                {visible.map((project) => (
+                {visibleRows.map(({ project, depth }) => (
                   <ProjectCard
                     key={project.id}
                     project={project}
+                    depth={depth}
                     pinned={pinnedProjectIds.has(project.id)}
                     canDelete={isWorkspaceAdmin}
                   />

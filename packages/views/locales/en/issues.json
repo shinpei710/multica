@@ -437,7 +437,8 @@
       "search_placeholder": "Assign to...",
       "members_group": "Members",
       "agents_group": "Agents",
-      "squads_group": "Squads"
+      "squads_group": "Squads",
+      "runtimes_group": "Runtimes"
     },
     "start_date": {
       "trigger_label": "Start date",

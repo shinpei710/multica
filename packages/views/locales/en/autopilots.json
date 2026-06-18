@@ -359,7 +359,8 @@
     "select_agent": "Select agent",
     "select_assignee": "Select agent or squad",
     "agents_group": "Agents",
-    "squads_group": "Squads"
+    "squads_group": "Squads",
+    "runtimes_group": "Runtimes"
   },
   "timezone_picker": {
     "search_placeholder": "Search timezone..."

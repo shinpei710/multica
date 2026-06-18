@@ -69,6 +69,9 @@ func (h *Handler) authorizeAgentEnv(w http.ResponseWriter, r *http.Request) (db.
 	if !ok {
 		return db.Agent{}, db.Member{}, false
 	}
+	if rejectRuntimeBlankAgentWrite(w, agent) {
+		return db.Agent{}, db.Member{}, false
+	}
 
 	workspaceID := uuidToString(agent.WorkspaceID)
 	userID := requestUserID(r)

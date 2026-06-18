@@ -123,7 +123,8 @@
     "local_clear": "Clear",
     "local_pick_failed": "Could not open the directory picker.",
     "local_invalid_dir": "This directory can't be used. Pick another.",
-    "local_hint": "Agents on other machines won't see this path — they'll fail to start. Use repos for shared work."
+    "local_hint": "Agents on other machines won't see this path — they'll fail to start. Use repos for shared work.",
+    "subproject_breadcrumb": "Subproject of {{parent}}"
   },
   "create_issue": {
     "sr_manual": "New Issue",
@@ -186,7 +187,8 @@
       "error_agent_unavailable_fallback": "Agent is unavailable. Pick another agent.",
       "error_daemon_version": "This agent's daemon CLI ({{current}}) is below the required {{min}}. Upgrade the daemon to use Create with agent.",
       "error_unknown": "Failed to submit. Try again.",
-      "sub_issue_of": "Sub-issue of {{identifier}}"
+      "sub_issue_of": "Sub-issue of {{identifier}}",
+      "runtimes_group": "Runtimes"
     }
   }
 }

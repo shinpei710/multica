@@ -9,8 +9,8 @@ import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import type { Issue, IssueAssigneeGroup, ProjectStatus, ProjectPriority, UpdateIssueRequest } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
-import { projectDetailOptions } from "@multica/core/projects/queries";
-import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
+import { projectDetailOptions, projectListOptions } from "@multica/core/projects/queries";
+import { useUpdateProject } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
 import {
@@ -72,19 +72,11 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
 import { useT } from "../../i18n";
 import { useProjectStatusLabels, useProjectPriorityLabels } from "./labels";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
+import { ProjectIcon } from "./project-icon";
+import { ProjectDeleteDialog } from "./project-delete-dialog";
 
 // ---------------------------------------------------------------------------
 // Property row — sidebar property display
@@ -417,6 +409,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const router = useNavigation();
   const userId = useAuthStore((s) => s.user?.id);
   const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
+  const { data: allProjects = [] } = useQuery(projectListOptions(wsId));
   const recordRecentContext = useRecentContextStore((s) => s.recordVisit);
   useEffect(() => {
     if (project) {
@@ -439,7 +432,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { getActorName } = useActorName();
   const updateProject = useUpdateProject();
-  const deleteProject = useDeleteProject();
   const { data: pinnedItems = [] } = useQuery({
     ...pinListOptions(wsId, userId ?? ""),
     enabled: !!userId,
@@ -489,16 +481,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     [project, updateProject],
   );
 
-  const handleDelete = useCallback(() => {
-    if (!project) return;
-    deleteProject.mutate(project.id, {
-      onSuccess: () => {
-        toast.success(t(($) => $.detail.toast_project_deleted));
-        router.push(wsPaths.projects());
-      },
-    });
-  }, [project, deleteProject, router, wsPaths, t]);
-
   if (isLoading) {
     return (
       <div className="mx-auto w-full max-w-4xl px-8 py-10 space-y-4">
@@ -516,6 +498,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
   const issueMetrics = getProjectIssueMetrics(project);
   const statusCfg = PROJECT_STATUS_CONFIG[project.status];
+  const childProjects = allProjects
+    .filter((p) => p.parent_project_id === project.id)
+    .toSorted((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.title.localeCompare(b.title));
 
   const sidebarContent = (
     <div className="space-y-5">
@@ -734,6 +719,48 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         </div>}
       </div>
 
+
+      {/* Subprojects */}
+      <div>
+        <button
+          type="button"
+          className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70"
+          onClick={() =>
+            useModalStore.getState().open("create-project", {
+              parent_project_id: project.id,
+              parent_project_title: project.title,
+            })
+          }
+        >
+          {t(($) => $.detail.section_subprojects)}
+          <Plus className="ml-auto size-3 text-muted-foreground" />
+        </button>
+        {childProjects.length > 0 ? (
+          <div className="space-y-1 pl-2">
+            {childProjects.map((child) => (
+              <button
+                key={child.id}
+                type="button"
+                onClick={() => router.push(wsPaths.projectDetail(child.id))}
+                className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent/60"
+              >
+                <ProjectIcon project={child} size="sm" />
+                <span className="min-w-0 flex-1 truncate">{child.title}</span>
+                {child.child_count > 0 && (
+                  <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                    {child.child_count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="pl-4 text-xs text-muted-foreground">
+            {t(($) => $.detail.no_subprojects)}
+          </div>
+        )}
+      </div>
+
       {/* Resources */}
       <ProjectResourcesSection projectId={projectId} />
     </div>
@@ -856,23 +883,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         )}
       </ResizablePanelGroup>
 
-      {/* Delete confirmation */}
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t(($) => $.delete_dialog.title)}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t(($) => $.delete_dialog.description)}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t(($) => $.delete_dialog.cancel)}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-white hover:bg-destructive/90">
-              {t(($) => $.delete_dialog.confirm)}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ProjectDeleteDialog
+        project={project}
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        onDeleted={() => router.push(wsPaths.projects())}
+      />
     </>
   );
 }

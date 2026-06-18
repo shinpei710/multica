@@ -87,7 +87,7 @@ func (q *Queries) CancelAgentTasksByRuntimeOrAgent(ctx context.Context, arg Canc
 }
 
 const countActiveAgentsByRuntime = `-- name: CountActiveAgentsByRuntime :one
-SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL
+SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL AND kind = 'configured'
 `
 
 func (q *Queries) CountActiveAgentsByRuntime(ctx context.Context, runtimeID pgtype.UUID) (int64, error) {
@@ -123,7 +123,9 @@ func (q *Queries) DeleteAgentRuntime(ctx context.Context, id pgtype.UUID) error 
 }
 
 const deleteArchivedAgentsByRuntime = `-- name: DeleteArchivedAgentsByRuntime :exec
-DELETE FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL
+DELETE FROM agent
+WHERE runtime_id = $1
+  AND (archived_at IS NOT NULL OR kind = 'runtime_blank')
 `
 
 func (q *Queries) DeleteArchivedAgentsByRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
@@ -515,7 +517,10 @@ func (q *Queries) ListAgentRuntimesByOwner(ctx context.Context, arg ListAgentRun
 }
 
 const listArchivedAgentIDsByRuntime = `-- name: ListArchivedAgentIDsByRuntime :many
-SELECT id FROM agent WHERE runtime_id = $1 AND archived_at IS NOT NULL
+SELECT id FROM agent
+WHERE runtime_id = $1
+  AND archived_at IS NOT NULL
+  AND kind = 'configured'
 `
 
 // Companion to DeleteArchivedAgentsByRuntime: enumerates the archived agents

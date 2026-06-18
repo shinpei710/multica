@@ -155,8 +155,8 @@ type Daemon struct {
 	// command resolves; read by runTask via customCommandPathForRuntime to
 	// launch the custom command for a claimed task. Guarded by mu.
 	profileCommandPaths map[string]string
-	reloading    sync.Mutex         // prevents concurrent workspace syncs
-	runtimeSet   *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
+	reloading           sync.Mutex         // prevents concurrent workspace syncs
+	runtimeSet          *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
 
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
@@ -3062,6 +3062,9 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 		// state via the task gc-check endpoint.
 		meta.Kind = execenv.GCKindQuickCreate
 		meta.TaskID = task.ID
+	case task.QuickCreateAgentPrompt != "":
+		meta.Kind = execenv.GCKindQuickCreate
+		meta.TaskID = task.ID
 	default:
 		return execenv.GCMeta{}, false
 	}
@@ -3175,6 +3178,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AutopilotSource:                  task.AutopilotSource,
 		AutopilotTriggerPayload:          strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 		QuickCreatePrompt:                task.QuickCreatePrompt,
+		QuickCreateAgentPrompt:           task.QuickCreateAgentPrompt,
 		IsSquadLeader:                    strings.Contains(instructions, "## Squad Operating Protocol"),
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
@@ -3366,6 +3370,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				taskLog.Warn("quick-create attachment ids: marshal failed; skipping env injection", "error", err)
 			}
 		}
+	}
+	if task.QuickCreateAgentPrompt != "" {
+		agentEnv["MULTICA_QUICK_CREATE_AGENT_TASK_ID"] = task.ID
 	}
 	// Ensure the multica CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not

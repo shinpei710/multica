@@ -129,6 +129,7 @@ export function AgentOverviewPane({
   // "open".
   const [pendingTab, setPendingTab] = useState<DetailTab | null>(null);
 
+  const isRuntimeBlank = (agent.kind ?? "configured") === "runtime_blank";
   const runtime = agent.runtime_id
     ? runtimes.find((r) => r.id === agent.runtime_id) ?? null
     : null;
@@ -160,12 +161,13 @@ export function AgentOverviewPane({
     const showMcp = runtime ? providerSupportsMcpConfig(runtime.provider) : true;
     const showRuntimeConfig = runtime ? runtime.provider === "openclaw" : false;
     return detailTabs.filter((tab) => {
+      if (isRuntimeBlank) return tab.id === "activity" || tab.id === "tasks";
       if (tab.id === "mcp_config") return showMcp;
       if (tab.id === "integrations") return larkConfigured;
       if (tab.id === "runtime_config") return showRuntimeConfig;
       return true;
     });
-  }, [runtime, larkConfigured]);
+  }, [runtime, larkConfigured, isRuntimeBlank]);
 
   // If the active tab disappears (e.g. user just switched the agent's
   // runtime to one that doesn't read mcp_config), fall back to Activity

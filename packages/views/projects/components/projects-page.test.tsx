@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
     toggleFilter: vi.fn(),
     clearFilters: vi.fn(),
   },
+  restoreProject: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -54,8 +55,17 @@ vi.mock("@tanstack/react-query", () => ({
 
 vi.mock("@multica/core/projects", () => ({
   projectListOptions: () => ({ queryKey: ["projects"] }),
+  projectTrashOptions: () => ({ queryKey: ["project-trash"] }),
   useUpdateProject: () => ({ mutate: mocks.updateProject }),
-  useDeleteProject: () => ({ mutate: mocks.deleteProject }),
+  useDeleteProject: () => ({
+    mutate: mocks.deleteProject,
+    mutateAsync: mocks.deleteProject,
+    isPending: false,
+  }),
+  useRestoreProject: () => ({
+    mutateAsync: mocks.restoreProject,
+    isPending: false,
+  }),
   useProjectViewStore: (selector: (state: unknown) => unknown) =>
     selector(mocks.projectViewState),
 }));
@@ -186,9 +196,14 @@ const PROJECT: Project = {
   priority: "high",
   lead_type: null,
   lead_id: null,
+  parent_project_id: null,
+  position: 0,
+  deleted_at: null,
+  delete_expires_at: null,
   created_at: "2026-06-01T00:00:00Z",
   updated_at: "2026-06-01T00:00:00Z",
   issue_count: 3,
+  child_count: 0,
   done_count: 1,
   resource_count: 0,
 };
@@ -231,6 +246,9 @@ beforeEach(() => {
   mocks.pins = [];
   mocks.updateProject.mockClear();
   mocks.deleteProject.mockClear();
+  mocks.deleteProject.mockResolvedValue(undefined);
+  mocks.restoreProject.mockClear();
+  mocks.restoreProject.mockResolvedValue({ projects: [], total: 0 });
   mocks.createPin.mockClear();
   mocks.deletePin.mockClear();
   mocks.openModal.mockClear();

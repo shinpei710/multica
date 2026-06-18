@@ -11,6 +11,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countChildProjectsByProject = `-- name: CountChildProjectsByProject :one
+SELECT count(*) FROM project
+WHERE parent_project_id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) CountChildProjectsByProject(ctx context.Context, parentProjectID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countChildProjectsByProject, parentProjectID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countIssuesByProject = `-- name: CountIssuesByProject :one
 SELECT count(*) FROM issue
 WHERE project_id = $1
@@ -23,24 +35,45 @@ func (q *Queries) CountIssuesByProject(ctx context.Context, projectID pgtype.UUI
 	return count, err
 }
 
+const countIssuesInProjectTree = `-- name: CountIssuesInProjectTree :one
+WITH RECURSIVE tree AS (
+    SELECT p.id FROM project p WHERE p.id = $1
+    UNION ALL
+    SELECT child.id
+    FROM project child
+    JOIN tree parent ON child.parent_project_id = parent.id
+)
+SELECT count(*) FROM issue
+WHERE project_id IN (SELECT id FROM tree)
+`
+
+func (q *Queries) CountIssuesInProjectTree(ctx context.Context, id pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countIssuesInProjectTree, id)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createProject = `-- name: CreateProject :one
 INSERT INTO project (
     workspace_id, title, description, icon, status,
-    lead_type, lead_id, priority
+    lead_type, lead_id, priority, parent_project_id, position
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
-) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10::double precision, 0)
+) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, parent_project_id, position, deleted_at, deleted_by, delete_expires_at, deleted_batch_id
 `
 
 type CreateProjectParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Title       string      `json:"title"`
-	Description pgtype.Text `json:"description"`
-	Icon        pgtype.Text `json:"icon"`
-	Status      string      `json:"status"`
-	LeadType    pgtype.Text `json:"lead_type"`
-	LeadID      pgtype.UUID `json:"lead_id"`
-	Priority    string      `json:"priority"`
+	WorkspaceID     pgtype.UUID   `json:"workspace_id"`
+	Title           string        `json:"title"`
+	Description     pgtype.Text   `json:"description"`
+	Icon            pgtype.Text   `json:"icon"`
+	Status          string        `json:"status"`
+	LeadType        pgtype.Text   `json:"lead_type"`
+	LeadID          pgtype.UUID   `json:"lead_id"`
+	Priority        string        `json:"priority"`
+	ParentProjectID pgtype.UUID   `json:"parent_project_id"`
+	Position        pgtype.Float8 `json:"position"`
 }
 
 func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error) {
@@ -53,6 +86,8 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		arg.LeadType,
 		arg.LeadID,
 		arg.Priority,
+		arg.ParentProjectID,
+		arg.Position,
 	)
 	var i Project
 	err := row.Scan(
@@ -67,12 +102,51 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Priority,
+		&i.ParentProjectID,
+		&i.Position,
+		&i.DeletedAt,
+		&i.DeletedBy,
+		&i.DeleteExpiresAt,
+		&i.DeletedBatchID,
 	)
 	return i, err
 }
 
+const deleteExpiredProjects = `-- name: DeleteExpiredProjects :execrows
+WITH RECURSIVE descendants(root_id, id) AS (
+    SELECT p.id, child.id
+    FROM project p
+    JOIN project child ON child.parent_project_id = p.id
+    WHERE p.deleted_at IS NOT NULL
+      AND p.delete_expires_at < now()
+    UNION ALL
+    SELECT d.root_id, child.id
+    FROM descendants d
+    JOIN project child ON child.parent_project_id = d.id
+)
+DELETE FROM project p
+WHERE p.deleted_at IS NOT NULL
+  AND p.delete_expires_at < now()
+  AND NOT EXISTS (
+      SELECT 1
+      FROM descendants d
+      JOIN project child ON child.id = d.id
+      WHERE d.root_id = p.id
+        AND (child.deleted_at IS NULL OR child.delete_expires_at IS NULL OR child.delete_expires_at >= now())
+  )
+`
+
+func (q *Queries) DeleteExpiredProjects(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredProjects)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteProject = `-- name: DeleteProject :exec
-DELETE FROM project WHERE id = $1 AND workspace_id = $2
+DELETE FROM project
+WHERE id = $1 AND workspace_id = $2
 `
 
 type DeleteProjectParams struct {
@@ -80,14 +154,48 @@ type DeleteProjectParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-// Defense-in-depth: workspace_id is a SQL-layer tenant guard. See DeleteIssue.
 func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) error {
 	_, err := q.db.Exec(ctx, deleteProject, arg.ID, arg.WorkspaceID)
 	return err
 }
 
+const getActiveProjectInWorkspace = `-- name: GetActiveProjectInWorkspace :one
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, parent_project_id, position, deleted_at, deleted_by, delete_expires_at, deleted_batch_id FROM project
+WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL
+`
+
+type GetActiveProjectInWorkspaceParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetActiveProjectInWorkspace(ctx context.Context, arg GetActiveProjectInWorkspaceParams) (Project, error) {
+	row := q.db.QueryRow(ctx, getActiveProjectInWorkspace, arg.ID, arg.WorkspaceID)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Icon,
+		&i.Status,
+		&i.LeadType,
+		&i.LeadID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Priority,
+		&i.ParentProjectID,
+		&i.Position,
+		&i.DeletedAt,
+		&i.DeletedBy,
+		&i.DeleteExpiresAt,
+		&i.DeletedBatchID,
+	)
+	return i, err
+}
+
 const getProject = `-- name: GetProject :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, parent_project_id, position, deleted_at, deleted_by, delete_expires_at, deleted_batch_id FROM project
 WHERE id = $1
 `
 
@@ -106,12 +214,51 @@ func (q *Queries) GetProject(ctx context.Context, id pgtype.UUID) (Project, erro
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Priority,
+		&i.ParentProjectID,
+		&i.Position,
+		&i.DeletedAt,
+		&i.DeletedBy,
+		&i.DeleteExpiresAt,
+		&i.DeletedBatchID,
 	)
 	return i, err
 }
 
+const getProjectChildCounts = `-- name: GetProjectChildCounts :many
+SELECT parent_project_id AS project_id, count(*)::bigint AS child_count
+FROM project
+WHERE parent_project_id = ANY($1::uuid[])
+  AND deleted_at IS NULL
+GROUP BY parent_project_id
+`
+
+type GetProjectChildCountsRow struct {
+	ProjectID  pgtype.UUID `json:"project_id"`
+	ChildCount int64       `json:"child_count"`
+}
+
+func (q *Queries) GetProjectChildCounts(ctx context.Context, projectIds []pgtype.UUID) ([]GetProjectChildCountsRow, error) {
+	rows, err := q.db.Query(ctx, getProjectChildCounts, projectIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetProjectChildCountsRow{}
+	for rows.Next() {
+		var i GetProjectChildCountsRow
+		if err := rows.Scan(&i.ProjectID, &i.ChildCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getProjectInWorkspace = `-- name: GetProjectInWorkspace :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, parent_project_id, position, deleted_at, deleted_by, delete_expires_at, deleted_batch_id FROM project
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -135,6 +282,12 @@ func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWor
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Priority,
+		&i.ParentProjectID,
+		&i.Position,
+		&i.DeletedAt,
+		&i.DeletedBy,
+		&i.DeleteExpiresAt,
+		&i.DeletedBatchID,
 	)
 	return i, err
 }
@@ -174,12 +327,58 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, projectIds []pgtype.
 	return items, nil
 }
 
-const listProjects = `-- name: ListProjects :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority FROM project
+const listDeletedProjects = `-- name: ListDeletedProjects :many
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, parent_project_id, position, deleted_at, deleted_by, delete_expires_at, deleted_batch_id FROM project
 WHERE workspace_id = $1
+  AND deleted_at IS NOT NULL
+ORDER BY deleted_at DESC, title ASC
+`
+
+func (q *Queries) ListDeletedProjects(ctx context.Context, workspaceID pgtype.UUID) ([]Project, error) {
+	rows, err := q.db.Query(ctx, listDeletedProjects, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Project{}
+	for rows.Next() {
+		var i Project
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Icon,
+			&i.Status,
+			&i.LeadType,
+			&i.LeadID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Priority,
+			&i.ParentProjectID,
+			&i.Position,
+			&i.DeletedAt,
+			&i.DeletedBy,
+			&i.DeleteExpiresAt,
+			&i.DeletedBatchID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProjects = `-- name: ListProjects :many
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, parent_project_id, position, deleted_at, deleted_by, delete_expires_at, deleted_batch_id FROM project
+WHERE workspace_id = $1
+  AND deleted_at IS NULL
   AND ($2::text IS NULL OR status = $2)
   AND ($3::text IS NULL OR priority = $3)
-ORDER BY created_at DESC
+ORDER BY COALESCE(parent_project_id, '00000000-0000-0000-0000-000000000000'::uuid), position ASC, created_at DESC
 `
 
 type ListProjectsParams struct {
@@ -209,6 +408,149 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Priority,
+			&i.ParentProjectID,
+			&i.Position,
+			&i.DeletedAt,
+			&i.DeletedBy,
+			&i.DeleteExpiresAt,
+			&i.DeletedBatchID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const restoreProjectTree = `-- name: RestoreProjectTree :many
+WITH target AS (
+    SELECT p.deleted_batch_id
+    FROM project p
+    WHERE p.id = $1 AND p.workspace_id = $2 AND p.deleted_at IS NOT NULL
+), tree AS (
+    SELECT p.id
+    FROM project p, target t
+    WHERE p.workspace_id = $2 AND p.deleted_batch_id = t.deleted_batch_id
+)
+UPDATE project p
+SET deleted_at = NULL,
+    deleted_by = NULL,
+    delete_expires_at = NULL,
+    deleted_batch_id = NULL,
+    updated_at = now()
+FROM tree
+WHERE p.id = tree.id
+RETURNING p.id, p.workspace_id, p.title, p.description, p.icon, p.status, p.lead_type, p.lead_id, p.created_at, p.updated_at, p.priority, p.parent_project_id, p.position, p.deleted_at, p.deleted_by, p.delete_expires_at, p.deleted_batch_id
+`
+
+type RestoreProjectTreeParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) RestoreProjectTree(ctx context.Context, arg RestoreProjectTreeParams) ([]Project, error) {
+	rows, err := q.db.Query(ctx, restoreProjectTree, arg.ID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Project{}
+	for rows.Next() {
+		var i Project
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Icon,
+			&i.Status,
+			&i.LeadType,
+			&i.LeadID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Priority,
+			&i.ParentProjectID,
+			&i.Position,
+			&i.DeletedAt,
+			&i.DeletedBy,
+			&i.DeleteExpiresAt,
+			&i.DeletedBatchID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const softDeleteProjectTree = `-- name: SoftDeleteProjectTree :many
+WITH RECURSIVE tree AS (
+    SELECT p.id FROM project p WHERE p.id = $1 AND p.workspace_id = $2
+    UNION ALL
+    SELECT child.id
+    FROM project child
+    JOIN tree parent ON child.parent_project_id = parent.id
+    WHERE child.workspace_id = $2
+), batch AS (
+    SELECT COALESCE($4::uuid, gen_random_uuid()) AS id
+)
+UPDATE project p
+SET deleted_at = now(),
+    deleted_by = $3,
+    delete_expires_at = now() + INTERVAL '30 days',
+    deleted_batch_id = batch.id,
+    updated_at = now()
+FROM tree, batch
+WHERE p.id = tree.id
+  AND p.deleted_at IS NULL
+RETURNING p.id, p.workspace_id, p.title, p.description, p.icon, p.status, p.lead_type, p.lead_id, p.created_at, p.updated_at, p.priority, p.parent_project_id, p.position, p.deleted_at, p.deleted_by, p.delete_expires_at, p.deleted_batch_id
+`
+
+type SoftDeleteProjectTreeParams struct {
+	ID             pgtype.UUID `json:"id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	DeletedBy      pgtype.UUID `json:"deleted_by"`
+	DeletedBatchID pgtype.UUID `json:"deleted_batch_id"`
+}
+
+func (q *Queries) SoftDeleteProjectTree(ctx context.Context, arg SoftDeleteProjectTreeParams) ([]Project, error) {
+	rows, err := q.db.Query(ctx, softDeleteProjectTree,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.DeletedBy,
+		arg.DeletedBatchID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Project{}
+	for rows.Next() {
+		var i Project
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Icon,
+			&i.Status,
+			&i.LeadType,
+			&i.LeadID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Priority,
+			&i.ParentProjectID,
+			&i.Position,
+			&i.DeletedAt,
+			&i.DeletedBy,
+			&i.DeleteExpiresAt,
+			&i.DeletedBatchID,
 		); err != nil {
 			return nil, err
 		}
@@ -229,20 +571,28 @@ UPDATE project SET
     priority = COALESCE($6, priority),
     lead_type = $7,
     lead_id = $8,
+    parent_project_id = CASE
+        WHEN $9::boolean THEN $10::uuid
+        ELSE parent_project_id
+    END,
+    position = COALESCE($11::double precision, position),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, parent_project_id, position, deleted_at, deleted_by, delete_expires_at, deleted_batch_id
 `
 
 type UpdateProjectParams struct {
-	ID          pgtype.UUID `json:"id"`
-	Title       pgtype.Text `json:"title"`
-	Description pgtype.Text `json:"description"`
-	Icon        pgtype.Text `json:"icon"`
-	Status      pgtype.Text `json:"status"`
-	Priority    pgtype.Text `json:"priority"`
-	LeadType    pgtype.Text `json:"lead_type"`
-	LeadID      pgtype.UUID `json:"lead_id"`
+	ID                 pgtype.UUID   `json:"id"`
+	Title              pgtype.Text   `json:"title"`
+	Description        pgtype.Text   `json:"description"`
+	Icon               pgtype.Text   `json:"icon"`
+	Status             pgtype.Text   `json:"status"`
+	Priority           pgtype.Text   `json:"priority"`
+	LeadType           pgtype.Text   `json:"lead_type"`
+	LeadID             pgtype.UUID   `json:"lead_id"`
+	ParentProjectIDSet bool          `json:"parent_project_id_set"`
+	ParentProjectID    pgtype.UUID   `json:"parent_project_id"`
+	Position           pgtype.Float8 `json:"position"`
 }
 
 func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error) {
@@ -255,6 +605,9 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		arg.Priority,
 		arg.LeadType,
 		arg.LeadID,
+		arg.ParentProjectIDSet,
+		arg.ParentProjectID,
+		arg.Position,
 	)
 	var i Project
 	err := row.Scan(
@@ -269,6 +622,12 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Priority,
+		&i.ParentProjectID,
+		&i.Position,
+		&i.DeletedAt,
+		&i.DeletedBy,
+		&i.DeleteExpiresAt,
+		&i.DeletedBatchID,
 	)
 	return i, err
 }

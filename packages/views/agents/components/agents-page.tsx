@@ -7,6 +7,7 @@ import {
   ArchiveRestore,
   Bot,
   Loader2,
+  Sparkles,
   Lock,
   Plus,
   X,
@@ -77,6 +78,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { PageHeader } from "../../layout/page-header";
 import { availabilityConfig } from "../presence";
 import { CreateAgentDialog } from "./create-agent-dialog";
+import { QuickCreateAgentDialog } from "./quick-create-agent-dialog";
 import { AgentRowActions } from "./agent-row-actions";
 import { AgentListToolbar } from "./agent-list-toolbar";
 import { useT } from "../../i18n";
@@ -180,9 +182,11 @@ export interface AgentsPageProps {
 function PageHeaderBar({
   totalCount,
   onCreate,
+  onQuickCreate,
 }: {
   totalCount: number;
   onCreate: () => void;
+  onQuickCreate: () => void;
 }) {
   const { t } = useT("agents");
   return (
@@ -207,19 +211,32 @@ function PageHeaderBar({
           </a>
         </p>
       </div>
-      {/* Quiet chrome button (outline, icon-only below md) — primary is
-          reserved for the empty state's CTA. */}
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-        aria-label={t(($) => $.page.new_agent)}
-        onClick={onCreate}
-      >
-        <Plus className="h-3.5 w-3.5" />
-        <span className="hidden md:inline">{t(($) => $.page.new_agent)}</span>
-      </Button>
+      <div className="flex items-center gap-1">
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 w-8 gap-1 px-0 text-muted-foreground md:w-auto md:px-2.5"
+          aria-label={t(($) => $.quick_create.entry)}
+          onClick={onQuickCreate}
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          <span className="hidden md:inline">{t(($) => $.quick_create.entry)}</span>
+        </Button>
+        {/* Quiet chrome button (outline, icon-only below md) — primary is
+            reserved for the empty state's CTA. */}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+          aria-label={t(($) => $.page.new_agent)}
+          onClick={onCreate}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          <span className="hidden md:inline">{t(($) => $.page.new_agent)}</span>
+        </Button>
+      </div>
     </PageHeader>
   );
 }
@@ -236,7 +253,7 @@ function ListError({
   const { t } = useT("agents");
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeaderBar totalCount={0} onCreate={onCreate} />
+      <PageHeaderBar totalCount={0} onCreate={onCreate} onQuickCreate={onCreate} />
       <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
         <AlertCircle className="h-8 w-8 text-destructive" />
         <div>
@@ -348,6 +365,11 @@ function NameCell({ row }: { row: AgentListRow }) {
               />
               <TooltipContent>{VISIBILITY_TOOLTIP.private}</TooltipContent>
             </Tooltip>
+          )}
+          {(agent.kind ?? "configured") === "runtime_blank" && (
+            <span className="shrink-0 rounded bg-info/10 px-1 text-[10px] font-medium text-info">
+              {t(($) => $.row.runtime_blank)}
+            </span>
           )}
           {isOwnedByMe && (
             <span className="shrink-0 rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground">
@@ -813,6 +835,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
 
   const [showCreate, setShowCreate] = useState(false);
+  const [showQuickCreate, setShowQuickCreate] = useState(false);
   const [duplicateTemplate, setDuplicateTemplate] = useState<Agent | null>(
     null,
   );
@@ -910,7 +933,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         lastActiveDays: lastActiveDaysAgo(activity),
         owner: agent.owner_id ? membersById.get(agent.owner_id) ?? null : null,
         isOwnedByMe: isOwner,
-        canManage: isWorkspaceAdmin || isOwner,
+        canManage: (agent.kind ?? "configured") !== "runtime_blank" && (isWorkspaceAdmin || isOwner),
       };
     });
   }, [
@@ -1060,6 +1083,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
       <PageHeaderBar
         totalCount={totalCount}
         onCreate={() => setShowCreate(true)}
+        onQuickCreate={() => setShowQuickCreate(true)}
       />
 
       {isLoading ? (
@@ -1205,6 +1229,10 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         rows={selectedRows}
         onClear={() => setSelectedIds(new Set())}
       />
+
+      {showQuickCreate && (
+        <QuickCreateAgentDialog onClose={() => setShowQuickCreate(false)} />
+      )}
 
       {showCreate && (
         <CreateAgentDialog

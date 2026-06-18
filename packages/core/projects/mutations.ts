@@ -11,6 +11,7 @@ export function useCreateProject() {
   return useMutation({
     mutationFn: (data: CreateProjectRequest) => api.createProject(data),
     onSuccess: (newProject) => {
+      qc.setQueryData<Project>(projectKeys.detail(wsId, newProject.id), newProject);
       qc.setQueryData<ListProjectsResponse>(projectKeys.list(wsId), (old) =>
         old && !old.projects.some((p) => p.id === newProject.id)
           ? { ...old, projects: [...old.projects, newProject], total: old.total + 1 }
@@ -19,6 +20,7 @@ export function useCreateProject() {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: projectKeys.trash(wsId) });
     },
   });
 }
@@ -56,24 +58,61 @@ export function useDeleteProject() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
-    mutationFn: (id: string) => api.deleteProject(id),
-    onMutate: async (id) => {
+    mutationFn: ({ id, confirm = false }: { id: string; confirm?: boolean }) =>
+      api.deleteProject(id, confirm),
+    onMutate: async ({ id, confirm }) => {
+      if (!confirm) return { prevList: undefined, id, optimistic: false };
       await qc.cancelQueries({ queryKey: projectKeys.list(wsId) });
       const prevList = qc.getQueryData<ListProjectsResponse>(projectKeys.list(wsId));
-      qc.setQueryData<ListProjectsResponse>(projectKeys.list(wsId), (old) =>
-        old ? { ...old, projects: old.projects.filter((p) => p.id !== id), total: old.total - 1 } : old,
-      );
+      qc.setQueryData<ListProjectsResponse>(projectKeys.list(wsId), (old) => {
+        if (!old) return old;
+        const removed = collectProjectTreeIds(old.projects, id);
+        return {
+          ...old,
+          projects: old.projects.filter((p) => !removed.has(p.id)),
+          total: Math.max(0, old.total - removed.size),
+        };
+      });
       qc.removeQueries({ queryKey: projectKeys.detail(wsId, id) });
-      return { prevList };
+      return { prevList, id, optimistic: true };
     },
-    onError: (_err, _id, ctx) => {
+    onError: (_err, _vars, ctx) => {
       if (ctx?.prevList) qc.setQueryData(projectKeys.list(wsId), ctx.prevList);
     },
-    onSuccess: (_data, id) => {
-      useRecentContextStore.getState().forgetContext(wsId, { type: "project", id });
+    onSuccess: (_data, vars) => {
+      useRecentContextStore.getState().forgetContext(wsId, { type: "project", id: vars.id });
     },
-    onSettled: () => {
+    onSettled: (_data, _err, vars) => {
       qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: projectKeys.trash(wsId) });
+      qc.invalidateQueries({ queryKey: projectKeys.detail(wsId, vars.id) });
     },
   });
+}
+
+export function useRestoreProject() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.restoreProject(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: projectKeys.trash(wsId) });
+    },
+  });
+}
+
+function collectProjectTreeIds(projects: Project[], rootId: string): Set<string> {
+  const ids = new Set<string>([rootId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const project of projects) {
+      if (project.parent_project_id && ids.has(project.parent_project_id) && !ids.has(project.id)) {
+        ids.add(project.id);
+        changed = true;
+      }
+    }
+  }
+  return ids;
 }

@@ -32,6 +32,8 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     reaction_added: t(($) => $.types.reaction_added),
     quick_create_done: t(($) => $.types.quick_create_done),
     quick_create_failed: t(($) => $.types.quick_create_failed),
+    agent_create_done: t(($) => $.types.agent_create_done),
+    agent_create_failed: t(($) => $.types.agent_create_failed),
   };
 }
 
@@ -109,6 +111,16 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
     case "quick_create_failed": {
       const detail = getQuickCreateFailureDetail(item);
       if (detail) return <span>{t(($) => $.labels.failed_with_detail, { detail })}</span>;
+      return <span>{typeLabels[item.type]}</span>;
+    }
+    case "agent_create_done": {
+      const name = details.agent_name || item.title;
+      if (name) return <span>{t(($) => $.labels.created_agent_with_ai, { name })}</span>;
+      return <span>{typeLabels[item.type]}</span>;
+    }
+    case "agent_create_failed": {
+      const detail = details.error || item.body;
+      if (detail) return <span>{t(($) => $.labels.agent_create_failed_detail, { detail })}</span>;
       return <span>{typeLabels[item.type]}</span>;
     }
     default:

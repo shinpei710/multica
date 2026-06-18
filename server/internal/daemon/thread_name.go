@@ -9,6 +9,7 @@ func deriveTaskThreadName(task Task) string {
 		task.ThreadName,
 		task.AutopilotTitle,
 		task.QuickCreatePrompt,
+		task.QuickCreateAgentPrompt,
 		task.ChatMessage,
 		task.TriggerCommentContent,
 	}

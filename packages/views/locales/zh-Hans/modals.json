@@ -123,7 +123,8 @@
     "local_clear": "清除",
     "local_pick_failed": "无法打开目录选择器。",
     "local_invalid_dir": "该目录不可用，请重新选择。",
-    "local_hint": "其他机器上的 agent 看不到这个路径，会启动失败。需要协作请用仓库模式。"
+    "local_hint": "其他机器上的 agent 看不到这个路径，会启动失败。需要协作请用仓库模式。",
+    "subproject_breadcrumb": "{{parent}} 的子项目"
   },
   "create_issue": {
     "sr_manual": "新建 issue",
@@ -186,7 +187,8 @@
       "error_agent_unavailable_fallback": "智能体不可用，请换一个。",
       "error_daemon_version": "该智能体的守护进程 CLI（{{current}}）低于要求的 {{min}}。请升级守护进程后再使用通过智能体创建。",
       "error_unknown": "提交失败，请重试。",
-      "sub_issue_of": "作为 {{identifier}} 的子 issue"
+      "sub_issue_of": "作为 {{identifier}} 的子 issue",
+      "runtimes_group": "运行时"
     }
   }
 }

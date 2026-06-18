@@ -394,6 +394,10 @@ function TaskRow({
       ? isTerminalStatus
         ? t(($) => $.tab_body.activity.source_quick_create)
         : t(($) => $.tab_body.activity.source_creating_issue)
+      : task.kind === "quick_create_agent"
+        ? isTerminalStatus
+          ? t(($) => $.tab_body.activity.source_quick_create_agent)
+          : t(($) => $.tab_body.activity.source_creating_agent)
       : task.chat_session_id
         ? t(($) => $.tab_body.activity.source_chat_session)
         : task.autopilot_run_id

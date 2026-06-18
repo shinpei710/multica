@@ -493,6 +493,14 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			h.mergeLegacyRuntimes(r, registered, provider, req.LegacyDaemonIDs)
 		}
 
+		if _, err := h.ensureRuntimeBlankAgent(r.Context(), registered, "system", ""); err != nil {
+			slog.Warn("daemon register: ensure runtime blank agent failed",
+				"runtime_id", uuidToString(registered.ID),
+				"workspace_id", req.WorkspaceID,
+				"error", err,
+			)
+		}
+
 		resp = append(resp, runtimeToResponse(registered))
 	}
 
@@ -1584,6 +1592,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// prompt come from the task's context JSONB. Resolve workspace from
 	// there so the isolation check below has something to compare.
 	hasQuickCreate := false
+	hasQuickCreateAgent := false
 	if task.Context != nil && !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid {
 		var qc service.QuickCreateContext
 		if json.Unmarshal(task.Context, &qc) == nil && qc.Type == service.QuickCreateContextType {
@@ -1706,6 +1715,23 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		var qca service.QuickCreateAgentContext
+		if json.Unmarshal(task.Context, &qca) == nil && qca.Type == service.QuickCreateAgentContextType {
+			hasQuickCreateAgent = true
+			resp.QuickCreateAgentPrompt = qca.Prompt
+			resp.QuickCreateAgentRuntimeID = qca.RuntimeID
+			resp.QuickCreateAgentVisibility = qca.Visibility
+			resp.QuickCreateAgentModel = qca.Model
+			resp.QuickCreateAgentThinkingLevel = qca.ThinkingLevel
+			resp.ThreadName = qca.Prompt
+			resp.WorkspaceID = qca.WorkspaceID
+			if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(qca.WorkspaceID)); err == nil && ws.Repos != nil {
+				var repos []RepoData
+				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+					resp.Repos = repos
+				}
+			}
+		}
 	}
 
 	// Workspace isolation check: the daemon uses this response's workspace_id
@@ -1727,6 +1753,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			"has_chat", task.ChatSessionID.Valid,
 			"has_autopilot_run", task.AutopilotRunID.Valid,
 			"has_quick_create", hasQuickCreate,
+			"has_quick_create_agent", hasQuickCreateAgent,
 		)
 		if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
 			slog.Error("task claim: cancel after workspace check failed",

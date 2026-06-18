@@ -24,6 +24,9 @@ func BuildPrompt(task Task, provider string) string {
 	if task.AutopilotRunID != "" {
 		return buildAutopilotPrompt(task)
 	}
+	if task.QuickCreateAgentPrompt != "" {
+		return buildQuickCreateAgentPrompt(task)
+	}
 	if task.QuickCreatePrompt != "" {
 		return buildQuickCreatePrompt(task)
 	}
@@ -32,6 +35,44 @@ func BuildPrompt(task Task, provider string) string {
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). On long-running issues use `--recent 20 --output json` to read the 20 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
+	return b.String()
+}
+
+func buildQuickCreateAgentPrompt(task Task) string {
+	var b strings.Builder
+	b.WriteString("You are running as an AI agent designer for a Multica workspace.\n\n")
+	b.WriteString("A user described the agent they want. There is NO existing agent to edit. Your job is to create one well-formed configured agent with a single `multica agent create` command.\n\n")
+	fmt.Fprintf(&b, "User input:\n> %s\n\n", task.QuickCreateAgentPrompt)
+	runtimeID := task.QuickCreateAgentRuntimeID
+	if runtimeID == "" {
+		runtimeID = task.RuntimeID
+	}
+	fmt.Fprintf(&b, "Target runtime: pass `--runtime-id %q`. The selected runtime is both the generator runtime and the runtime the new agent must use.\n", runtimeID)
+	visibility := task.QuickCreateAgentVisibility
+	if visibility == "" {
+		visibility = "private"
+	}
+	fmt.Fprintf(&b, "Visibility: pass `--visibility %q`.\n", visibility)
+	if task.QuickCreateAgentModel != "" {
+		fmt.Fprintf(&b, "Model: pass `--model %q` unless the user's request explicitly requires a different model.\n", task.QuickCreateAgentModel)
+	}
+	if task.QuickCreateAgentThinkingLevel != "" {
+		fmt.Fprintf(&b, "Thinking level: pass `--thinking-level %q` unless the user's request explicitly requires a different level.\n", task.QuickCreateAgentThinkingLevel)
+	}
+
+	b.WriteString("\nField rules:\n\n")
+	b.WriteString("- **name**: required. Short, specific, and easy to pick from an agent list. Avoid generic names like \"Assistant\" unless the user asked for a general assistant.\n")
+	b.WriteString("- **description**: one sentence, 255 characters or fewer. Explain what this agent is best at.\n")
+	b.WriteString("- **instructions**: required. Write durable operating instructions for the new agent. Include its role, decision boundaries, expected workflow, output style, and any constraints the user gave. Do not invent credentials, private tools, or unavailable integrations.\n")
+	b.WriteString("- **custom env / MCP / skills**: omit unless the user explicitly provided concrete values. Never fabricate secret names or tokens.\n")
+	b.WriteString("- **model and thinking_level**: optional. Use the provided defaults above when present. If absent, omit unless the user clearly requested a specific model or reasoning level.\n\n")
+
+	b.WriteString("Output format:\n")
+	b.WriteString("- Run exactly one `multica agent create --output json` invocation.\n")
+	b.WriteString("- For instructions, write the multi-line content to a local UTF-8 file and pass it with `--instructions-file <path>`. Do not inline long instructions into a shell argument.\n")
+	b.WriteString("- Do not retry for any reason. A retry may create duplicate agents.\n")
+	b.WriteString("- After success, parse the JSON response to read the created agent's `id` and `name`, then print exactly one line: `Created agent <name>: <id>` and exit.\n")
+	b.WriteString("- On CLI error or JSON parse error, exit with the error as the only output. The platform writes a failure notification automatically.\n")
 	return b.String()
 }
 

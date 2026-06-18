@@ -110,7 +110,7 @@ function RepoUrlText({
   );
 }
 
-export function CreateProjectModal({ onClose }: { onClose: () => void }) {
+export function CreateProjectModal({ onClose, data }: { onClose: () => void; data?: Record<string, unknown> | null }) {
   const { t } = useT("modals");
   const router = useNavigation();
   const workspace = useCurrentWorkspace();
@@ -122,6 +122,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const { getActorName } = useActorName();
   const projectStatusLabels = useProjectStatusLabels();
   const projectPriorityLabels = useProjectPriorityLabels();
+  const parentProjectId = typeof data?.parent_project_id === "string" ? data.parent_project_id : null;
+  const parentProjectTitle = typeof data?.parent_project_title === "string" ? data.parent_project_title : null;
 
   const draft = useProjectDraftStore((s) => s.draft);
   const setDraft = useProjectDraftStore((s) => s.setDraft);
@@ -266,6 +268,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         priority,
         lead_type: leadType,
         lead_id: leadId,
+        parent_project_id: parentProjectId,
         // Server attaches these in the same transaction as the project.
         resources,
       });
@@ -316,7 +319,11 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           <div className="flex items-center gap-1.5 text-xs">
             <span className="text-muted-foreground">{workspaceName}</span>
             <ChevronRight className="size-3 text-muted-foreground/50" />
-            <span className="font-medium">{t(($) => $.create_project.title_breadcrumb)}</span>
+            <span className="font-medium">
+              {parentProjectTitle
+                ? t(($) => $.create_project.subproject_breadcrumb, { parent: parentProjectTitle })
+                : t(($) => $.create_project.title_breadcrumb)}
+            </span>
           </div>
           <div className="flex items-center gap-1">
             <Tooltip>

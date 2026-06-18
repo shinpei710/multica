@@ -13,6 +13,10 @@ import type {
   CancelTaskResponse,
   CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
+  ListProjectsResponse,
+  Project,
+  QuickCreateAgentResponse,
+  SearchProjectsResponse,
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
   ListIssuesResponse,
@@ -274,6 +278,75 @@ export const GroupedIssuesResponseSchema = z.object({
 
 export const EMPTY_GROUPED_ISSUES_RESPONSE: GroupedIssuesResponse = {
   groups: [],
+};
+
+export const ProjectSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  title: z.string(),
+  description: z.string().nullable().optional().transform((v) => v ?? null),
+  icon: z.string().nullable().optional().transform((v) => v ?? null),
+  status: z.string().default("planned"),
+  priority: z.string().default("none"),
+  lead_type: z.string().nullable().optional().transform((v) => v ?? null),
+  lead_id: z.string().nullable().optional().transform((v) => v ?? null),
+  parent_project_id: z.string().nullable().optional().transform((v) => v ?? null),
+  position: z.number().default(0),
+  deleted_at: z.string().nullable().optional().transform((v) => v ?? null),
+  delete_expires_at: z.string().nullable().optional().transform((v) => v ?? null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  issue_count: z.number().default(0),
+  child_count: z.number().default(0),
+  done_count: z.number().default(0),
+  resource_count: z.number().default(0),
+}).loose();
+
+export const ListProjectsResponseSchema = z.object({
+  projects: z.array(ProjectSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_PROJECTS_RESPONSE: ListProjectsResponse = {
+  projects: [],
+  total: 0,
+};
+
+export const EMPTY_PROJECT: Project = {
+  id: "",
+  workspace_id: "",
+  title: "",
+  description: null,
+  icon: null,
+  status: "planned",
+  priority: "none",
+  lead_type: null,
+  lead_id: null,
+  parent_project_id: null,
+  position: 0,
+  deleted_at: null,
+  delete_expires_at: null,
+  created_at: "",
+  updated_at: "",
+  issue_count: 0,
+  child_count: 0,
+  done_count: 0,
+  resource_count: 0,
+};
+
+const SearchProjectResultSchema = ProjectSchema.safeExtend({
+  match_source: z.string().default("title"),
+  matched_snippet: z.string().optional(),
+}).loose();
+
+export const SearchProjectsResponseSchema = z.object({
+  projects: z.array(SearchProjectResultSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
+  projects: [],
+  total: 0,
 };
 
 const SubscriberSchema = z.object({
@@ -578,6 +651,14 @@ export const EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE: CreateAgentFromTemplateR
   agent: { id: "" } as Agent,
   imported_skill_ids: [],
   reused_skill_ids: [],
+};
+
+export const QuickCreateAgentResponseSchema = z.object({
+  task_id: z.string().default(""),
+}).loose();
+
+export const EMPTY_QUICK_CREATE_AGENT_RESPONSE: QuickCreateAgentResponse = {
+  task_id: "",
 };
 
 // Squad list responses carry lightweight membership previews used by hover

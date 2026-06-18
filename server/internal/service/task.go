@@ -289,6 +289,8 @@ func (s *TaskService) taskMetricsContext(ctx context.Context, task db.AgentTaskQ
 	default:
 		if _, ok := s.parseQuickCreateContext(task); ok {
 			source = "quick_create"
+		} else if _, ok := s.parseQuickCreateAgentContext(task); ok {
+			source = "quick_create_agent"
 		} else if tc.Source != "" {
 			source = tc.Source
 		}
@@ -373,6 +375,11 @@ func (s *TaskService) taskAnalyticsContext(ctx context.Context, task db.AgentTas
 		}
 	}
 	if qc, ok := s.parseQuickCreateContext(task); ok {
+		tc.WorkspaceID = qc.WorkspaceID
+		tc.UserID = qc.RequesterID
+		tc.Source = analytics.SourceManual
+	}
+	if qc, ok := s.parseQuickCreateAgentContext(task); ok {
 		tc.WorkspaceID = qc.WorkspaceID
 		tc.UserID = qc.RequesterID
 		tc.Source = analytics.SourceManual
@@ -583,6 +590,23 @@ type QuickCreateContext struct {
 // QuickCreateContextType marks a task as a quick-create job.
 const QuickCreateContextType = "quick_create"
 
+// QuickCreateAgentContext is the JSON payload stored on a quick-create-agent
+// task. The daemon translates Prompt into one `multica agent create` call
+// running through the selected runtime's blank agent.
+type QuickCreateAgentContext struct {
+	Type          string `json:"type"`
+	Prompt        string `json:"prompt"`
+	RequesterID   string `json:"requester_id"`
+	WorkspaceID   string `json:"workspace_id"`
+	RuntimeID     string `json:"runtime_id"`
+	Visibility    string `json:"visibility,omitempty"`
+	Model         string `json:"model,omitempty"`
+	ThinkingLevel string `json:"thinking_level,omitempty"`
+}
+
+// QuickCreateAgentContextType marks a task as an AI-created-agent job.
+const QuickCreateAgentContextType = "quick_create_agent"
+
 // EnqueueQuickCreateTask creates a queued task that has no issue / chat /
 // autopilot link — the user's natural-language prompt is stored in the
 // task's context JSONB and the agent is expected to translate it into a
@@ -666,6 +690,53 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	// cycle. Without this the user perceives "quick create never
 	// triggered" because the modal closes immediately and the task
 	// sits in 'queued' until the next sleepWithContextOrWakeup tick.
+	s.NotifyTaskEnqueued(ctx, task)
+	return task, nil
+}
+
+func (s *TaskService) EnqueueQuickCreateAgentTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, blankAgent db.Agent, prompt, visibility, model, thinkingLevel string) (db.AgentTaskQueue, error) {
+	if blankAgent.ArchivedAt.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("runtime blank agent is archived")
+	}
+	if blankAgent.Kind != "runtime_blank" {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is not a runtime blank agent")
+	}
+	if !blankAgent.RuntimeID.Valid {
+		return db.AgentTaskQueue{}, fmt.Errorf("runtime blank agent has no runtime")
+	}
+
+	payload := QuickCreateAgentContext{
+		Type:          QuickCreateAgentContextType,
+		Prompt:        prompt,
+		RequesterID:   util.UUIDToString(requesterID),
+		WorkspaceID:   util.UUIDToString(workspaceID),
+		RuntimeID:     util.UUIDToString(blankAgent.RuntimeID),
+		Visibility:    visibility,
+		Model:         model,
+		ThinkingLevel: thinkingLevel,
+	}
+	contextJSON, err := json.Marshal(payload)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("marshal quick-create-agent context: %w", err)
+	}
+
+	task, err := s.Queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
+		AgentID:   blankAgent.ID,
+		RuntimeID: blankAgent.RuntimeID,
+		Priority:  priorityToInt("high"),
+		Context:   contextJSON,
+	})
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("create quick-create-agent task: %w", err)
+	}
+
+	slog.Info("quick-create-agent task enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"blank_agent_id", util.UUIDToString(blankAgent.ID),
+		"requester_id", util.UUIDToString(requesterID),
+		"workspace_id", util.UUIDToString(workspaceID),
+		"runtime_id", payload.RuntimeID,
+	)
 	s.NotifyTaskEnqueued(ctx, task)
 	return task, nil
 }
@@ -1311,6 +1382,9 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	if qc, ok := s.parseQuickCreateContext(task); ok {
 		s.notifyQuickCreateCompleted(ctx, task, qc)
 	}
+	if qc, ok := s.parseQuickCreateAgentContext(task); ok {
+		s.notifyQuickCreateAgentCompleted(ctx, task, qc)
+	}
 
 	// For chat tasks, save assistant reply and broadcast chat:done. The
 	// resume pointer was already persisted inside the transaction above.
@@ -1491,6 +1565,9 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	if retried == nil {
 		if qc, ok := s.parseQuickCreateContext(task); ok {
 			s.notifyQuickCreateFailed(ctx, task, qc, errMsg)
+		}
+		if qc, ok := s.parseQuickCreateAgentContext(task); ok {
+			s.notifyQuickCreateAgentFailed(ctx, task, qc, errMsg)
 		}
 	}
 	// Reconcile agent status
@@ -2057,6 +2134,9 @@ func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentT
 	if qc, ok := s.parseQuickCreateContext(task); ok {
 		return qc.WorkspaceID
 	}
+	if qc, ok := s.parseQuickCreateAgentContext(task); ok {
+		return qc.WorkspaceID
+	}
 	return ""
 }
 
@@ -2250,6 +2330,23 @@ func (s *TaskService) parseQuickCreateContext(task db.AgentTaskQueue) (QuickCrea
 	return qc, true
 }
 
+func (s *TaskService) parseQuickCreateAgentContext(task db.AgentTaskQueue) (QuickCreateAgentContext, bool) {
+	if task.IssueID.Valid || task.ChatSessionID.Valid || task.AutopilotRunID.Valid {
+		return QuickCreateAgentContext{}, false
+	}
+	if len(task.Context) == 0 {
+		return QuickCreateAgentContext{}, false
+	}
+	var qc QuickCreateAgentContext
+	if err := json.Unmarshal(task.Context, &qc); err != nil {
+		return QuickCreateAgentContext{}, false
+	}
+	if qc.Type != QuickCreateAgentContextType {
+		return QuickCreateAgentContext{}, false
+	}
+	return qc, true
+}
+
 // notifyQuickCreateCompleted writes a success inbox notification to the
 // requester pointing at the issue the agent just created. The issue is
 // stamped with origin_type=quick_create + origin_id=<task_id> by the
@@ -2404,6 +2501,97 @@ func (s *TaskService) notifyQuickCreateFailed(ctx context.Context, task db.Agent
 	s.publishQuickCreateInbox(item, qc.WorkspaceID, util.UUIDToString(task.AgentID), "")
 }
 
+func (s *TaskService) notifyQuickCreateAgentCompleted(ctx context.Context, task db.AgentTaskQueue, qc QuickCreateAgentContext) {
+	requesterID, err := util.ParseUUID(qc.RequesterID)
+	if err != nil {
+		slog.Warn("quick-create-agent completion: invalid requester id", "task_id", util.UUIDToString(task.ID), "error", err)
+		return
+	}
+	workspaceID, err := util.ParseUUID(qc.WorkspaceID)
+	if err != nil {
+		slog.Warn("quick-create-agent completion: invalid workspace id", "task_id", util.UUIDToString(task.ID), "error", err)
+		return
+	}
+	agent, err := s.Queries.GetAgentByOrigin(ctx, db.GetAgentByOriginParams{
+		WorkspaceID: workspaceID,
+		OriginType:  pgtype.Text{String: "quick_create_agent", Valid: true},
+		OriginID:    task.ID,
+	})
+	if err != nil {
+		slog.Warn("quick-create-agent completion: no agent found, writing failure inbox",
+			"task_id", util.UUIDToString(task.ID),
+			"blank_agent_id", util.UUIDToString(task.AgentID),
+			"workspace_id", qc.WorkspaceID,
+		)
+		s.notifyQuickCreateAgentFailed(ctx, task, qc, "agent finished without creating a new agent")
+		return
+	}
+	details, _ := json.Marshal(map[string]any{
+		"task_id":         util.UUIDToString(task.ID),
+		"blank_agent_id":  util.UUIDToString(task.AgentID),
+		"agent_id":        util.UUIDToString(agent.ID),
+		"agent_name":      agent.Name,
+		"original_prompt": qc.Prompt,
+	})
+	item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		WorkspaceID:   workspaceID,
+		RecipientType: "member",
+		RecipientID:   requesterID,
+		Type:          "agent_create_done",
+		Severity:      "info",
+		IssueID:       pgtype.UUID{},
+		Title:         agent.Name,
+		Body:          pgtype.Text{String: agent.Description, Valid: agent.Description != ""},
+		ActorType:     pgtype.Text{String: "agent", Valid: true},
+		ActorID:       task.AgentID,
+		Details:       details,
+	})
+	if err != nil {
+		slog.Error("quick-create-agent completion: inbox write failed", "task_id", util.UUIDToString(task.ID), "error", err)
+		return
+	}
+	s.publishQuickCreateInbox(item, qc.WorkspaceID, util.UUIDToString(task.AgentID), "")
+}
+
+func (s *TaskService) notifyQuickCreateAgentFailed(ctx context.Context, task db.AgentTaskQueue, qc QuickCreateAgentContext, errMsg string) {
+	requesterID, err := util.ParseUUID(qc.RequesterID)
+	if err != nil {
+		return
+	}
+	workspaceID, err := util.ParseUUID(qc.WorkspaceID)
+	if err != nil {
+		return
+	}
+	if errMsg == "" {
+		errMsg = "Agent create did not finish successfully"
+	}
+	details, _ := json.Marshal(map[string]any{
+		"task_id":         util.UUIDToString(task.ID),
+		"blank_agent_id":  util.UUIDToString(task.AgentID),
+		"runtime_id":      qc.RuntimeID,
+		"original_prompt": qc.Prompt,
+		"error":           redact.Text(errMsg),
+	})
+	item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		WorkspaceID:   workspaceID,
+		RecipientType: "member",
+		RecipientID:   requesterID,
+		Type:          "agent_create_failed",
+		Severity:      "action_required",
+		IssueID:       pgtype.UUID{},
+		Title:         "Agent create failed",
+		Body:          pgtype.Text{String: redact.Text(errMsg), Valid: true},
+		ActorType:     pgtype.Text{String: "agent", Valid: true},
+		ActorID:       task.AgentID,
+		Details:       details,
+	})
+	if err != nil {
+		slog.Error("quick-create-agent failure: inbox write failed", "task_id", util.UUIDToString(task.ID), "error", err)
+		return
+	}
+	s.publishQuickCreateInbox(item, qc.WorkspaceID, util.UUIDToString(task.AgentID), "")
+}
+
 // publishQuickCreateInbox emits the WS event so the requester's inbox list
 // updates immediately. Mirrors the payload shape used by the other inbox
 // listeners (notification_listeners.go).
@@ -2453,6 +2641,9 @@ func agentToMap(a db.Agent) map[string]any {
 		"visibility":           a.Visibility,
 		"status":               a.Status,
 		"max_concurrent_tasks": a.MaxConcurrentTasks,
+		"kind":                 a.Kind,
+		"origin_type":          util.TextToPtr(a.OriginType),
+		"origin_id":            util.UUIDToPtr(a.OriginID),
 		"owner_id":             util.UUIDToPtr(a.OwnerID),
 		"skills":               []any{},
 		"created_at":           util.TimestampToString(a.CreatedAt),

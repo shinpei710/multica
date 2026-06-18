@@ -80,7 +80,8 @@
     "others": "Others",
     "no_agents": "No agents",
     "history_group": "Chat history",
-    "agent_filter_placeholder": "Search agents..."
+    "agent_filter_placeholder": "Search agents...",
+    "runtimes": "Runtimes"
   },
   "empty_state": {
     "first_time_title": "Chat with your agents",

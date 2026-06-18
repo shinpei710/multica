@@ -45,7 +45,9 @@
     "agent_completed": "Agent completed",
     "reaction_added": "Reacted",
     "quick_create_done": "Created with agent",
-    "quick_create_failed": "Create with agent failed"
+    "quick_create_failed": "Create with agent failed",
+    "agent_create_done": "Agent created",
+    "agent_create_failed": "Agent create failed"
   },
   "labels": {
     "set_status_to": "Set status to",
@@ -58,7 +60,9 @@
     "removed_due_date": "Removed due date",
     "reacted_to_comment": "Reacted {{emoji}} to your comment",
     "created_with_agent": "Created with agent: {{identifier}}",
-    "failed_with_detail": "Failed: {{detail}}"
+    "failed_with_detail": "Failed: {{detail}}",
+    "created_agent_with_ai": "Created agent: {{name}}",
+    "agent_create_failed_detail": "Agent create failed: {{detail}}"
   },
   "errors": {
     "mark_read_failed": "Failed to mark as read",

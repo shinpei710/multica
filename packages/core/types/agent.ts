@@ -4,6 +4,10 @@ export type AgentRuntimeMode = "local" | "cloud";
 
 export type AgentVisibility = "workspace" | "private";
 
+export type AgentKind = "configured" | "runtime_blank";
+
+export type AgentOriginType = "quick_create_agent";
+
 // Runtime visibility is a separate axis from agent visibility — different
 // vocabulary because it gates a different action. "private" (default) means
 // only the runtime owner and workspace admins can bind agents to it;
@@ -201,7 +205,7 @@ export interface AgentTask {
    * tasks that have no linked issue (so e.g. quick-create tasks render
    * with a meaningful title instead of falling through to "Untracked").
    */
-  kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct";
+  kind?: "comment" | "autopilot" | "chat" | "quick_create" | "quick_create_agent" | "direct";
   /**
    * Local working directory pinned for this task by the daemon. Empty until
    * the daemon reports a work_dir (typically once execution starts). This is
@@ -277,6 +281,10 @@ export interface Agent {
   mcp_config_redacted?: boolean;
   visibility: AgentVisibility;
   status: AgentStatus;
+  /** Defaults to "configured" on older backends that predate runtime blank agents. */
+  kind?: AgentKind;
+  origin_type?: AgentOriginType | null;
+  origin_id?: string | null;
   max_concurrent_tasks: number;
   model: string;
   /**
@@ -328,6 +336,21 @@ export interface CreateAgentRequest {
   /** Optional template slug used by the onboarding agent picker. Surfaced
    *  as the `template` property on the `agent_created` PostHog event. */
   template?: string;
+  /** Internal provenance set by quick-create-agent tasks. Human UI should not set it. */
+  origin_type?: AgentOriginType;
+  origin_id?: string;
+}
+
+export interface QuickCreateAgentRequest {
+  prompt: string;
+  runtime_id: string;
+  visibility?: AgentVisibility;
+  model?: string;
+  thinking_level?: string;
+}
+
+export interface QuickCreateAgentResponse {
+  task_id: string;
 }
 
 /** Agent template summary — fields needed by the picker grid. Does NOT

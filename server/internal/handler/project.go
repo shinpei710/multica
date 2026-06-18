@@ -18,19 +18,24 @@ import (
 )
 
 type ProjectResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	Title       string  `json:"title"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-	Status      string  `json:"status"`
-	Priority    string  `json:"priority"`
-	LeadType    *string `json:"lead_type"`
-	LeadID      *string `json:"lead_id"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
-	IssueCount  int64   `json:"issue_count"`
-	DoneCount   int64   `json:"done_count"`
+	ID              string  `json:"id"`
+	WorkspaceID     string  `json:"workspace_id"`
+	ParentProjectID *string `json:"parent_project_id"`
+	Title           string  `json:"title"`
+	Description     *string `json:"description"`
+	Icon            *string `json:"icon"`
+	Status          string  `json:"status"`
+	Priority        string  `json:"priority"`
+	LeadType        *string `json:"lead_type"`
+	LeadID          *string `json:"lead_id"`
+	Position        float64 `json:"position"`
+	DeletedAt       *string `json:"deleted_at"`
+	DeleteExpiresAt *string `json:"delete_expires_at"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
+	IssueCount      int64   `json:"issue_count"`
+	DoneCount       int64   `json:"done_count"`
+	ChildCount      int64   `json:"child_count"`
 	// ResourceCount is a breadcrumb pointing at the sub-collection at
 	// /api/projects/{id}/resources. Resources themselves stay out of this
 	// payload to keep parent metadata and child collections separate; clients
@@ -40,17 +45,21 @@ type ProjectResponse struct {
 
 func projectToResponse(p db.Project) ProjectResponse {
 	return ProjectResponse{
-		ID:          uuidToString(p.ID),
-		WorkspaceID: uuidToString(p.WorkspaceID),
-		Title:       p.Title,
-		Description: textToPtr(p.Description),
-		Icon:        textToPtr(p.Icon),
-		Status:      p.Status,
-		Priority:    p.Priority,
-		LeadType:    textToPtr(p.LeadType),
-		LeadID:      uuidToPtr(p.LeadID),
-		CreatedAt:   timestampToString(p.CreatedAt),
-		UpdatedAt:   timestampToString(p.UpdatedAt),
+		ID:              uuidToString(p.ID),
+		WorkspaceID:     uuidToString(p.WorkspaceID),
+		ParentProjectID: uuidToPtr(p.ParentProjectID),
+		Title:           p.Title,
+		Description:     textToPtr(p.Description),
+		Icon:            textToPtr(p.Icon),
+		Status:          p.Status,
+		Priority:        p.Priority,
+		LeadType:        textToPtr(p.LeadType),
+		LeadID:          uuidToPtr(p.LeadID),
+		Position:        p.Position,
+		DeletedAt:       timestampToPtr(p.DeletedAt),
+		DeleteExpiresAt: timestampToPtr(p.DeleteExpiresAt),
+		CreatedAt:       timestampToString(p.CreatedAt),
+		UpdatedAt:       timestampToString(p.UpdatedAt),
 	}
 }
 
@@ -70,15 +79,54 @@ func (h *Handler) loadProjectResourceCount(ctx context.Context, projectID pgtype
 	return rows[0].ResourceCount
 }
 
+func (h *Handler) validateActiveParentProject(ctx context.Context, w http.ResponseWriter, workspaceID pgtype.UUID, parentID string) (pgtype.UUID, bool) {
+	parentUUID, ok := parseUUIDOrBadRequest(w, strings.TrimSpace(parentID), "parent_project_id")
+	if !ok {
+		return pgtype.UUID{}, false
+	}
+	if _, err := h.Queries.GetActiveProjectInWorkspace(ctx, db.GetActiveProjectInWorkspaceParams{
+		ID:          parentUUID,
+		WorkspaceID: workspaceID,
+	}); err != nil {
+		writeError(w, http.StatusBadRequest, "parent_project_id must refer to an active project in this workspace")
+		return pgtype.UUID{}, false
+	}
+	return parentUUID, true
+}
+
+func (h *Handler) projectWouldCreateCycle(ctx context.Context, workspaceID, projectID, parentProjectID pgtype.UUID) (bool, error) {
+	const query = `
+WITH RECURSIVE descendants(id) AS (
+    SELECT child.id
+    FROM project child
+    WHERE child.parent_project_id = $1
+      AND child.workspace_id = $2
+      AND child.deleted_at IS NULL
+    UNION ALL
+    SELECT child.id
+    FROM project child
+    JOIN descendants d ON child.parent_project_id = d.id
+    WHERE child.workspace_id = $2
+      AND child.deleted_at IS NULL
+)
+SELECT EXISTS(SELECT 1 FROM descendants WHERE id = $3)::boolean
+`
+	var exists bool
+	err := h.DB.QueryRow(ctx, query, projectID, workspaceID, parentProjectID).Scan(&exists)
+	return exists, err
+}
+
 type CreateProjectRequest struct {
-	Title       string                                `json:"title"`
-	Description *string                               `json:"description"`
-	Icon        *string                               `json:"icon"`
-	Status      string                                `json:"status"`
-	Priority    string                                `json:"priority"`
-	LeadType    *string                               `json:"lead_type"`
-	LeadID      *string                               `json:"lead_id"`
-	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
+	Title           string                                `json:"title"`
+	Description     *string                               `json:"description"`
+	Icon            *string                               `json:"icon"`
+	Status          string                                `json:"status"`
+	Priority        string                                `json:"priority"`
+	LeadType        *string                               `json:"lead_type"`
+	LeadID          *string                               `json:"lead_id"`
+	ParentProjectID *string                               `json:"parent_project_id"`
+	Position        *float64                              `json:"position"`
+	Resources       []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
 }
 
 // CreateProjectResourceRequestPayload mirrors CreateProjectResourceRequest but
@@ -92,13 +140,15 @@ type CreateProjectResourceRequestPayload struct {
 }
 
 type UpdateProjectRequest struct {
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-	Status      *string `json:"status"`
-	Priority    *string `json:"priority"`
-	LeadType    *string `json:"lead_type"`
-	LeadID      *string `json:"lead_id"`
+	Title           *string  `json:"title"`
+	Description     *string  `json:"description"`
+	Icon            *string  `json:"icon"`
+	Status          *string  `json:"status"`
+	Priority        *string  `json:"priority"`
+	LeadType        *string  `json:"lead_type"`
+	LeadID          *string  `json:"lead_id"`
+	ParentProjectID *string  `json:"parent_project_id"`
+	Position        *float64 `json:"position"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -128,6 +178,7 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	// Batch-fetch issue stats and resource counts for all projects
 	statsMap := make(map[string]db.GetProjectIssueStatsRow)
 	resourceCountMap := make(map[string]int64)
+	childCountMap := make(map[string]int64)
 	if len(projects) > 0 {
 		projectIDs := make([]pgtype.UUID, len(projects))
 		for i, p := range projects {
@@ -145,6 +196,12 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 				resourceCountMap[uuidToString(c.ProjectID)] = c.ResourceCount
 			}
 		}
+		childCounts, err := h.Queries.GetProjectChildCounts(r.Context(), projectIDs)
+		if err == nil {
+			for _, c := range childCounts {
+				childCountMap[uuidToString(c.ProjectID)] = c.ChildCount
+			}
+		}
 	}
 
 	resp := make([]ProjectResponse, len(projects))
@@ -155,6 +212,7 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 			resp[i].DoneCount = s.DoneCount
 		}
 		resp[i].ResourceCount = resourceCountMap[resp[i].ID]
+		resp[i].ChildCount = childCountMap[resp[i].ID]
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"projects": resp, "total": len(resp)})
 }
@@ -170,7 +228,7 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+	project, err := h.Queries.GetActiveProjectInWorkspace(r.Context(), db.GetActiveProjectInWorkspaceParams{
 		ID: idUUID, WorkspaceID: wsUUID,
 	})
 	if err != nil {
@@ -180,6 +238,9 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	resp := projectToResponse(project)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.ID)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
+	if childCount, err := h.Queries.CountChildProjectsByProject(r.Context(), project.ID); err == nil {
+		resp.ChildCount = childCount
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -263,6 +324,18 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var parentProjectID pgtype.UUID
+	if req.ParentProjectID != nil && strings.TrimSpace(*req.ParentProjectID) != "" {
+		var parentOK bool
+		parentProjectID, parentOK = h.validateActiveParentProject(r.Context(), w, wsUUID, *req.ParentProjectID)
+		if !parentOK {
+			return
+		}
+	}
+	var position pgtype.Float8
+	if req.Position != nil {
+		position = pgtype.Float8{Float64: *req.Position, Valid: true}
+	}
 
 	// Pre-validate every resource payload before opening a transaction so an
 	// invalid ref produces a clean 400 with no DB work. For local_directory we
@@ -301,14 +374,16 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	createParams := db.CreateProjectParams{
-		WorkspaceID: wsUUID,
-		Title:       req.Title,
-		Description: ptrToText(req.Description),
-		Icon:        ptrToText(req.Icon),
-		Status:      status,
-		LeadType:    leadType,
-		LeadID:      leadID,
-		Priority:    priority,
+		WorkspaceID:     wsUUID,
+		Title:           req.Title,
+		Description:     ptrToText(req.Description),
+		Icon:            ptrToText(req.Icon),
+		Status:          status,
+		LeadType:        leadType,
+		LeadID:          leadID,
+		Priority:        priority,
+		ParentProjectID: parentProjectID,
+		Position:        position,
 	}
 
 	// Without resources, keep the simple non-tx path.
@@ -410,7 +485,7 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	prevProject, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+	prevProject, err := h.Queries.GetActiveProjectInWorkspace(r.Context(), db.GetActiveProjectInWorkspaceParams{
 		ID: idUUID, WorkspaceID: wsUUID,
 	})
 	if err != nil {
@@ -488,6 +563,34 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			params.LeadID = pgtype.UUID{Valid: false}
 		}
 	}
+	if _, ok := rawFields["parent_project_id"]; ok {
+		params.ParentProjectIDSet = true
+		if req.ParentProjectID != nil && strings.TrimSpace(*req.ParentProjectID) != "" {
+			parentUUID, ok := h.validateActiveParentProject(r.Context(), w, wsUUID, *req.ParentProjectID)
+			if !ok {
+				return
+			}
+			if parentUUID == prevProject.ID {
+				writeError(w, http.StatusBadRequest, "parent_project_id cannot be the project itself")
+				return
+			}
+			cycle, err := h.projectWouldCreateCycle(r.Context(), wsUUID, prevProject.ID, parentUUID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to validate project hierarchy")
+				return
+			}
+			if cycle {
+				writeError(w, http.StatusBadRequest, "parent_project_id would create a project cycle")
+				return
+			}
+			params.ParentProjectID = parentUUID
+		} else {
+			params.ParentProjectID = pgtype.UUID{Valid: false}
+		}
+	}
+	if req.Position != nil {
+		params.Position = pgtype.Float8{Float64: *req.Position, Valid: true}
+	}
 	project, err := h.Queries.UpdateProject(r.Context(), params)
 	if err != nil {
 		h.writeProjectWriteError(w, r, err, "update")
@@ -496,6 +599,9 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	resp := projectToResponse(project)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.ID)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
+	if childCount, err := h.Queries.CountChildProjectsByProject(r.Context(), project.ID); err == nil {
+		resp.ChildCount = childCount
+	}
 	h.publish(protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{"project": resp})
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -511,7 +617,7 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+	project, err := h.Queries.GetActiveProjectInWorkspace(r.Context(), db.GetActiveProjectInWorkspaceParams{
 		ID: idUUID, WorkspaceID: wsUUID,
 	})
 	if err != nil {
@@ -522,15 +628,98 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.Queries.DeleteProject(r.Context(), db.DeleteProjectParams{
+	childCount, err := h.Queries.CountChildProjectsByProject(r.Context(), project.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to inspect project children")
+		return
+	}
+	issueCount, err := h.Queries.CountIssuesInProjectTree(r.Context(), project.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to inspect project issues")
+		return
+	}
+	if r.URL.Query().Get("confirm") != "true" && (childCount > 0 || issueCount > 0) {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":       "project is not empty",
+			"code":        "project_not_empty",
+			"child_count": childCount,
+			"issue_count": issueCount,
+		})
+		return
+	}
+	deleted, err := h.Queries.SoftDeleteProjectTree(r.Context(), db.SoftDeleteProjectTreeParams{
 		ID:          project.ID,
 		WorkspaceID: project.WorkspaceID,
-	}); err != nil {
+		DeletedBy:   parseUUID(userID),
+	})
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete project")
 		return
 	}
-	h.publish(protocol.EventProjectDeleted, workspaceID, "member", userID, map[string]any{"project_id": uuidToString(project.ID)})
+	projectIDs := make([]string, 0, len(deleted))
+	for _, p := range deleted {
+		projectIDs = append(projectIDs, uuidToString(p.ID))
+	}
+	h.publish(protocol.EventProjectDeleted, workspaceID, "member", userID, map[string]any{
+		"project_id":  uuidToString(project.ID),
+		"project_ids": projectIDs,
+	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) ListDeletedProjects(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	projects, err := h.Queries.ListDeletedProjects(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list deleted projects")
+		return
+	}
+	resp := make([]ProjectResponse, len(projects))
+	for i, p := range projects {
+		resp[i] = projectToResponse(p)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"projects": resp, "total": len(resp)})
+}
+
+func (h *Handler) RestoreProject(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	workspaceID := h.resolveWorkspaceID(r)
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "project id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	restored, err := h.Queries.RestoreProjectTree(r.Context(), db.RestoreProjectTreeParams{
+		ID:          idUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to restore project")
+		return
+	}
+	if len(restored) == 0 {
+		writeError(w, http.StatusNotFound, "project not found in trash")
+		return
+	}
+	resp := make([]ProjectResponse, len(restored))
+	for i, p := range restored {
+		resp[i] = projectToResponse(p)
+	}
+	h.publish(protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{
+		"projects": resp,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"projects": resp, "total": len(resp)})
 }
 
 // SearchProjectResponse extends ProjectResponse with search metadata.
@@ -651,11 +840,12 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) 
 
 	query := fmt.Sprintf(`SELECT p.id, p.workspace_id, p.title, p.description, p.icon,
 		p.status, p.priority, p.lead_type, p.lead_id,
-		p.created_at, p.updated_at,
+		p.created_at, p.updated_at, p.parent_project_id, p.position,
+		p.deleted_at, p.deleted_by, p.delete_expires_at, p.deleted_batch_id,
 		COUNT(*) OVER() AS total_count,
 		%s AS match_source
 	FROM project p
-	WHERE p.workspace_id = %s AND %s
+	WHERE p.workspace_id = %s AND p.deleted_at IS NULL AND %s
 	ORDER BY %s, p.updated_at DESC
 	LIMIT %s OFFSET %s`,
 		matchSourceExpr,
@@ -737,6 +927,12 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 			&row.project.LeadID,
 			&row.project.CreatedAt,
 			&row.project.UpdatedAt,
+			&row.project.ParentProjectID,
+			&row.project.Position,
+			&row.project.DeletedAt,
+			&row.project.DeletedBy,
+			&row.project.DeleteExpiresAt,
+			&row.project.DeletedBatchID,
 			&row.totalCount,
 			&row.matchSource,
 		); err != nil {
@@ -760,6 +956,7 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 	// Batch-fetch issue stats and resource counts
 	statsMap := make(map[string]db.GetProjectIssueStatsRow)
 	resourceCountMap := make(map[string]int64)
+	childCountMap := make(map[string]int64)
 	if len(results) > 0 {
 		projectIDs := make([]pgtype.UUID, len(results))
 		for i, r := range results {
@@ -777,6 +974,12 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 				resourceCountMap[uuidToString(c.ProjectID)] = c.ResourceCount
 			}
 		}
+		childCounts, err := h.Queries.GetProjectChildCounts(ctx, projectIDs)
+		if err == nil {
+			for _, c := range childCounts {
+				childCountMap[uuidToString(c.ProjectID)] = c.ChildCount
+			}
+		}
 	}
 
 	resp := make([]SearchProjectResponse, len(results))
@@ -787,6 +990,7 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 			pr.DoneCount = s.DoneCount
 		}
 		pr.ResourceCount = resourceCountMap[pr.ID]
+		pr.ChildCount = childCountMap[pr.ID]
 		spr := SearchProjectResponse{
 			ProjectResponse: pr,
 			MatchSource:     row.matchSource,

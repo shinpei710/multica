@@ -44,6 +44,9 @@ type Agent struct {
 	McpConfig          []byte             `json:"mcp_config"`
 	Model              pgtype.Text        `json:"model"`
 	ThinkingLevel      pgtype.Text        `json:"thinking_level"`
+	Kind               string             `json:"kind"`
+	OriginType         pgtype.Text        `json:"origin_type"`
+	OriginID           pgtype.UUID        `json:"origin_id"`
 }
 
 type AgentRuntime struct {
@@ -558,17 +561,23 @@ type PinnedItem struct {
 }
 
 type Project struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Title       string             `json:"title"`
-	Description pgtype.Text        `json:"description"`
-	Icon        pgtype.Text        `json:"icon"`
-	Status      string             `json:"status"`
-	LeadType    pgtype.Text        `json:"lead_type"`
-	LeadID      pgtype.UUID        `json:"lead_id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	Priority    string             `json:"priority"`
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Title           string             `json:"title"`
+	Description     pgtype.Text        `json:"description"`
+	Icon            pgtype.Text        `json:"icon"`
+	Status          string             `json:"status"`
+	LeadType        pgtype.Text        `json:"lead_type"`
+	LeadID          pgtype.UUID        `json:"lead_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Priority        string             `json:"priority"`
+	ParentProjectID pgtype.UUID        `json:"parent_project_id"`
+	Position        float64            `json:"position"`
+	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
+	DeletedBy       pgtype.UUID        `json:"deleted_by"`
+	DeleteExpiresAt pgtype.Timestamptz `json:"delete_expires_at"`
+	DeletedBatchID  pgtype.UUID        `json:"deleted_batch_id"`
 }
 
 type ProjectResource struct {
